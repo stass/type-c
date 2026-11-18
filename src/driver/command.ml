@@ -320,10 +320,10 @@ let run_header ~program ~stats ~trap (plan : Pipeline.header) =
 
 (* [run] performs a plan that [planned] gives, or reports why there is
    none. *)
-let run_planned planned run =
+let run_planned ~input planned run =
   match planned with
   | Error error ->
-      report (Pipeline.error_message error);
+      report (Pipeline.error_message ~input error);
       Exit (Exit_status.code Exit_status.Environment)
   | Ok plan -> (
       try
@@ -340,13 +340,13 @@ let run_pipeline (invocation : Invocation.t) temp_dir =
   let { Invocation.program; arguments; stats; trap; _ } = invocation in
   match invocation.action with
   | Invocation.Emit_c_header ->
-      run_planned
+      run_planned ~input:Pipeline.Interface
         (Pipeline.plan_header ~program ~temp_dir arguments)
         (run_header ~program ~stats ~trap)
   | Invocation.Compile | Invocation.Emit_c | Invocation.Print_target
   | Invocation.Print_version ->
       let emit_c = invocation.action = Invocation.Emit_c in
-      run_planned
+      run_planned ~input:Pipeline.Unit
         (Pipeline.plan ~program ~emit_c ~temp_dir arguments)
         (run_plan ~program ~stats ~trap)
 

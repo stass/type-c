@@ -12,7 +12,7 @@ open Typec_driver
 let model ~cc options =
   let arguments = Command_line.read (options @ [ "--emit-c"; "input.tc" ]) in
   match Pipeline.plan ~program:cc ~emit_c:true ~temp_dir:"." arguments with
-  | Error error -> failwith (Pipeline.error_message error)
+  | Error error -> failwith (Pipeline.error_message ~input:Unit error)
   | Ok { translations = []; _ } | Ok { translations = _ :: _ :: _; _ } ->
       failwith "the options name inputs"
   | Ok { translations = [ translation ]; target_options; _ } -> (

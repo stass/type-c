@@ -78,9 +78,14 @@ type t = {
           links, or compiles the other inputs *)
 }
 
+(** What the command line makes of its input: a [.tc] unit that
+    [typec] compiles or translates, or the [.tci] interface of
+    [--emit-c-header]. *)
+type input = Unit | Interface
+
 (** Why a command line with a [.tc] input has no pipeline. *)
 type error =
-  | Refused_option of { option : string; reason : string }
+  | Refused_option of { option : string; refusal : Cc_option.refusal }
   | Unaccepted_standard of string  (** the value of [-std=] *)
   | Missing_value of string  (** the option that lacks it *)
   | Output_for_several_inputs
@@ -157,4 +162,4 @@ val plan_header :
     [--emit-c-header] for the backend arguments of a command line. It
     refuses every option that {!plan} refuses, by the same table. *)
 
-val error_message : error -> string
+val error_message : input:input -> error -> string

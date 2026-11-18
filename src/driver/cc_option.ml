@@ -19,6 +19,16 @@ type typec_option =
   | Trap_function
   | Version
 
+(* What a message may tell the user to do about a refused option. *)
+type advice =
+  | No_advice
+  | Emit_instead  (* --emit-c or --emit-c-header writes the output *)
+  | Run_without_input  (* the option belongs to a command with no input *)
+
+type refusal = { why : string; advice : advice }
+
+let reason ?(advice = No_advice) why = { why; advice }
+
 type role =
   | Preprocess
   | Dependency of dependency
@@ -30,7 +40,7 @@ type role =
   | Output
   | Language
   | Stop of stop
-  | Refused of string
+  | Refused of refusal
   | Typec of typec_option
 
 type t = {
@@ -70,38 +80,44 @@ let long_entries role names =
   entries role (Separate 1) names @ long_joined_entries role names
 
 let stops_at_preprocessing =
-  "it stops after preprocessing; --emit-c writes the C of a .tc input"
+  reason ~advice:Emit_instead "it stops after preprocessing"
 
 let changes_preprocessed_text =
-  "the preprocessed text must keep its line markers and nothing else"
+  reason
+    "the preprocessed text must keep its line markers and nothing else"
 
 let dumps =
-  "the letters after -d select dumps, and some, such as -dD, -dM and -dI, \
-   change the preprocessed text"
+  reason
+    "the letters after -d select dumps, and some, such as -dD, -dM and -dI, \
+     change the preprocessed text"
 
 let prints_a_fact =
-  "it asks the backend to print a fact of itself; run it without the .tc \
-   input"
+  reason ~advice:Run_without_input
+    "it asks the backend to print a fact of itself"
 
 let names_options_to_add =
-  "it names a file, or a directory of files, of options that the backend \
-   adds to every step, which typec does not read"
+  reason
+    "it names a file, or a directory of files, of options that the backend \
+     adds to every step, which typec does not read"
 
 let keeps_intermediate_files =
-  "typec keeps no intermediate files; --emit-c writes the C"
+  reason ~advice:Emit_instead "typec keeps no intermediate files"
 
 let unsigned_bit_fields =
-  "GCC makes every bit-field declared without signed or unsigned \
-   unsigned, which typec's target model does not read"
+  reason
+    "GCC makes every bit-field declared without signed or unsigned \
+     unsigned, which typec's target model does not read"
 
 let float_constants =
-  "GCC makes an unsuffixed floating constant float, which typec's \
-   target model does not read"
+  reason
+    "GCC makes an unsuffixed floating constant float, which typec's \
+     target model does not read"
 
 (* Design 10.3 and 13.2. *)
 let pack_struct =
-  "under it GCC ignores each '#pragma pack' that typec writes around an \
-   instance of a generic, and warns of it; -fpack-struct=n passes"
+  reason
+    "under it GCC ignores each '#pragma pack' that typec writes around an \
+     instance of a generic, and warns of it; -fpack-struct=n passes"
 
 (* The options of typec, and those of the C compilers that typec
    supports (Target.minimum_major_version) up to GCC 16 and Clang 21,
@@ -158,12 +174,16 @@ let table =
         ];
       entries (Refused keeps_intermediate_files) Flag [ "-save-temps" ];
       entries (Refused keeps_intermediate_files) Joined [ "-save-temps=" ];
-      entries (Refused "it prints the commands instead of running them")
+      entries
+        (Refused (reason "it prints the commands instead of running them"))
         Flag [ "-###" ];
-      entries (Refused "it selects C90, and Type-C accepts C11 and C17")
+      entries
+        (Refused
+           (reason "it selects C90, and Type-C accepts C11 and C17"))
         Flag [ "-ansi" ];
-      entries (Refused "typec does not read the inputs after it") Flag
-        [ "--" ];
+      entries
+        (Refused (reason "typec does not read the inputs after it"))
+        Flag [ "--" ];
       (* GCC and Clang read the letters after -d, or after GCC's --dump,
          as dumps to make, and new letters come with new releases, so
          every letter is refused rather than those known to change the
@@ -335,7 +355,9 @@ let typec_spellings =
 
 (* The response file of GCC and Clang, @FILE, holds more arguments. *)
 let response_file =
-  { role = Refused "typec does not read the options in a response file";
+  { role =
+      Refused
+        (reason "typec does not read the options in a response file");
     separate_values = 0;
     joined_value = "";
     forwards = false }
@@ -347,8 +369,9 @@ let response_file =
 let unknown_long_option =
   { role =
       Refused
-        "typec does not know this long option, which GCC may read as an \
-         abbreviation of another or as -f and its name";
+        (reason
+           "typec does not know this long option, which GCC may read as \
+            an abbreviation of another or as -f and its name");
     separate_values = 0;
     joined_value = "";
     forwards = false }
@@ -413,5 +436,6 @@ let is_dump word = (classify word).role = Refused dumps
 
 let role (option : t) values =
   match List.find_opt is_dump (forwarded_options option values) with
-  | Some dump -> Refused (Printf.sprintf "it passes on %s, and %s" dump dumps)
+  | Some dump -> Refused
+        (reason (Printf.sprintf "it passes on %s, and %s" dump dumps.why))
   | None -> option.role

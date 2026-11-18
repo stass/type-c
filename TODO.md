@@ -275,17 +275,19 @@ The items are ordered by how often real code meets them.
   `__builtin_offsetof`. Recording call sites in the typed view, where
   `leave_untested` already clears what C does not evaluate, would make
   the count exact and delete the walker.
-- [Low] The refusals of options with a `.tc` input also apply under
-  `--emit-c-header`, as `typec(1)` says, but the message of
-  `typec --emit-c-header -E key.tci` says "cannot be used with a .tc
-  input" and sends the user to `--emit-c`, which `--emit-c-header`
-  refuses. Build the message in `src/driver/pipeline.ml` from the kind
-  of input that the command has.
 - [Low] Two console blocks of `examples/smtp/README.md` that show
   `typec` refusing a program are marked untested, because the page
   describes the change in words without showing it: the arm of `Auth`
   in `mail`, and `from.text` in `rset`. Show each as a diff block with
   an edit marker, so that `test/run/example_readmes.t` runs them.
+- [Low] The refusals of options of the backend name what the command
+  has by its input (`a .tc input`, or `--emit-c-header`), so under
+  `--emit-c` they say "a .tc input" with no input and `-E` is told to
+  use `--emit-c`, which it has. Key `Pipeline.error_message` on the
+  action of the invocation (compile, `--emit-c`, `--emit-c-header`)
+  instead of the kind of input. The message also prints the option
+  word of the command line raw with `%s`, where
+  `Invocation.error_message` uses `%S`.
 
 ## C headers (plan package 4.1)
 

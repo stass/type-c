@@ -23,8 +23,11 @@ type t = {
   finals : command list;
 }
 
+(* The input that a refusal is about, for its message. *)
+type input = Unit | Interface
+
 type error =
-  | Refused_option of { option : string; reason : string }
+  | Refused_option of { option : string; refusal : Cc_option.refusal }
   | Unaccepted_standard of string
   | Missing_value of string
   | Output_for_several_inputs
@@ -114,8 +117,8 @@ let options_where keep arguments =
 let refuse_unusable_options arguments =
   List.iter
     (function
-      | Command_line.Option { role = Refused reason; words; _ } ->
-          raise (Failed (Refused_option { option = List.hd words; reason }))
+      | Command_line.Option { role = Refused refusal; words; _ } ->
+          raise (Failed (Refused_option { option = List.hd words; refusal }))
       | Command_line.Truncated words ->
           raise (Failed (Missing_value (List.hd words)))
       | _ -> ())
@@ -664,14 +667,31 @@ let plan_header ~program ~temp_dir arguments =
       }
   with Failed error -> Error error
 
-let error_message = function
-  | Refused_option { option; reason } ->
-      Printf.sprintf "%s cannot be used with a .tc input: %s" option reason
+(* What an option or a choice cannot be used with, in a message. *)
+let used_with = function
+  | Unit -> "a .tc input"
+  | Interface -> "--emit-c-header"
+
+let advice_for input : Cc_option.advice -> string = function
+  | No_advice -> ""
+  | Emit_instead -> (
+      match input with
+      | Unit -> "; --emit-c writes the C of a .tc input"
+      | Interface -> "; --emit-c-header writes the header without it")
+  | Run_without_input -> (
+      match input with
+      | Unit -> "; run it without the .tc input"
+      | Interface -> "; run it without --emit-c-header")
+
+let error_message ~input = function
+  | Refused_option { option; refusal = { why; advice } } ->
+      Printf.sprintf "%s cannot be used with %s: %s%s" option
+        (used_with input) why (advice_for input advice)
   | Unaccepted_standard standard ->
       Printf.sprintf
-        "-std=%s cannot be used with a .tc input: Type-C accepts C11 and \
-         C17, in ISO or GNU form"
-        standard
+        "-std=%s cannot be used with %s: Type-C accepts C11 and C17, in \
+         ISO or GNU form"
+        standard (used_with input)
   | Missing_value option -> Printf.sprintf "missing argument to %s" option
   | Output_for_several_inputs ->
       "cannot specify -o with -c, -S or -M and more than one input"
@@ -698,6 +718,6 @@ let error_message = function
         path
   | Several_architectures names ->
       Printf.sprintf
-        "-arch cannot name several architectures (%s) with a .tc input: \
-         build each with one -arch and join the results with lipo"
-        (String.concat ", " names)
+        "-arch cannot name several architectures (%s) with %s: build \
+         each with one -arch and join the results with lipo"
+        (String.concat ", " names) (used_with input)

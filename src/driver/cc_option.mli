@@ -42,6 +42,15 @@ type typec_option =
   | Trap_function  (** [--trap-function=NAME] *)
   | Version  (** [--version] *)
 
+(** What a message may tell the user to do about a refused option:
+    [Emit_instead] says that [--emit-c] or [--emit-c-header] writes the
+    output that the option is after, and [Run_without_input] that the
+    option belongs to a command with no input. *)
+type advice = No_advice | Emit_instead | Run_without_input
+
+(** Why an option is refused with an input of typec. *)
+type refusal = { why : string; advice : advice }
+
 (** What an option is to the pipeline of a [.tc] input. *)
 type role =
   | Preprocess
@@ -62,7 +71,7 @@ type role =
   | Output  (** [-o]: names the result. *)
   | Language  (** [-x]: how cc treats the inputs after it. *)
   | Stop of stop
-  | Refused of string
+  | Refused of refusal
       (** Breaks the pipeline, for the reason given; allowed only on a
           command line without a [.tc] input. *)
   | Typec of typec_option

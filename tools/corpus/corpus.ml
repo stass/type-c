@@ -311,7 +311,7 @@ let reference_translation context ~temp_dir arguments =
   with
   | Ok { translations = [ translation ]; _ } -> translation
   | Ok _ -> fatal "typec's plan of the reference compile has another shape"
-  | Error error -> fatal "%s" (Pipeline.error_message error)
+  | Error error -> fatal "%s" (Pipeline.error_message ~input:Unit error)
 
 (* The step of typec's own pipeline (src/driver/pipeline.mli) for a goal
    on the .tc copy. Its commands are typec's, so the reference differs

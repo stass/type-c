@@ -19,6 +19,9 @@ let classified argument (role, separate_values, joined_value) =
   && option.separate_values = separate_values
   && option.joined_value = joined_value
 
+(* The reason of a refusal is not compared. *)
+let no_reason = { Cc_option.why = ""; advice = No_advice }
+
 let () =
   let cases =
     [
@@ -34,8 +37,8 @@ let () =
       ("--write-user-dependencies", (Dependency Write_dependencies, 0, ""));
       ("--print-missing-file-dependencies",
         (Dependency Dependency_detail, 0, ""));
-      ("-E", (Refused "", 0, ""));
-      ("-fpack-struct", (Refused "", 0, ""));
+      ("-E", (Refused no_reason, 0, ""));
+      ("-fpack-struct", (Refused no_reason, 0, ""));
       ("-fpack-struct=2", (Common, 0, ""));
       ("-fshort-enums", (Common, 0, ""));
       ("-std=c11", (Dialect, 0, "c11"));
@@ -66,14 +69,14 @@ let () =
       (* A long option that the table lacks is refused: GCC reads an
          abbreviation of a long option as that option and any other
          --NAME as -fNAME. *)
-      ("--cc", (Refused "", 0, ""));
-      ("--emit", (Refused "", 0, ""));
-      ("--preprocess", (Refused "", 0, ""));
-      ("--ansi", (Refused "", 0, ""));
-      ("--write-user-dep", (Refused "", 0, ""));
-      ("--short-enums", (Refused "", 0, ""));
-      ("--syntax-only", (Refused "", 0, ""));
-      ("--output-x", (Refused "", 0, ""));
+      ("--cc", (Refused no_reason, 0, ""));
+      ("--emit", (Refused no_reason, 0, ""));
+      ("--preprocess", (Refused no_reason, 0, ""));
+      ("--ansi", (Refused no_reason, 0, ""));
+      ("--write-user-dep", (Refused no_reason, 0, ""));
+      ("--short-enums", (Refused no_reason, 0, ""));
+      ("--syntax-only", (Refused no_reason, 0, ""));
+      ("--output-x", (Refused no_reason, 0, ""));
       ("--target=x86_64-linux-gnu", (Common, 0, "x86_64-linux-gnu"));
       ("--gcc-toolchain=/usr", (Common, 0, "/usr"));
       ("--coverage", (Common, 0, ""));
@@ -81,20 +84,20 @@ let () =
       ("--gcc-install-dir=/usr", (Common, 0, "/usr"));
       ("--embed-dir=data", (Preprocess, 0, "data"));
       ("--unwindlib=libgcc", (Link, 0, "libgcc"));
-      ("--target", (Refused "", 0, ""));
-      ("--include-dir=x", (Refused "", 0, ""));
+      ("--target", (Refused no_reason, 0, ""));
+      ("--include-dir=x", (Refused no_reason, 0, ""));
       (* GCC reads --dump as -d. Every -d form is refused, as the letters
          after -d select dumps and -dD, -dM and -dI change the
          preprocessed text; the options spelled with -d that name
          something else pass. *)
-      ("--dump=M", (Refused "", 0, ""));
-      ("--dump", (Refused "", 1, ""));
-      ("-d", (Refused "", 0, ""));
-      ("-dD", (Refused "", 0, ""));
-      ("-dI", (Refused "", 0, ""));
-      ("-dDI", (Refused "", 0, ""));
-      ("-dA", (Refused "", 0, ""));
-      ("-dumpbasex", (Refused "", 0, ""));
+      ("--dump=M", (Refused no_reason, 0, ""));
+      ("--dump", (Refused no_reason, 1, ""));
+      ("-d", (Refused no_reason, 0, ""));
+      ("-dD", (Refused no_reason, 0, ""));
+      ("-dI", (Refused no_reason, 0, ""));
+      ("-dDI", (Refused no_reason, 0, ""));
+      ("-dA", (Refused no_reason, 0, ""));
+      ("-dumpbasex", (Refused no_reason, 0, ""));
       ("-dumpbase", (Common, 1, ""));
       ("-dumpdir", (Common, 1, ""));
       ("-dumpbase-ext", (Common, 1, ""));
@@ -112,27 +115,27 @@ let () =
       ("-dynamic", (Link, 0, ""));
       ("-dylinker", (Link, 0, ""));
       (* A file of further options can add any option to every step. *)
-      ("-specs", (Refused "", 1, ""));
-      ("-specs=my.specs", (Refused "", 0, ""));
-      ("--specs", (Refused "", 1, ""));
-      ("--specs=my.specs", (Refused "", 0, ""));
-      ("--config", (Refused "", 1, ""));
-      ("--config=my.cfg", (Refused "", 0, ""));
-      ("--config-user-dir=.", (Refused "", 0, ""));
-      ("--config-system-dir=.", (Refused "", 0, ""));
+      ("-specs", (Refused no_reason, 1, ""));
+      ("-specs=my.specs", (Refused no_reason, 0, ""));
+      ("--specs", (Refused no_reason, 1, ""));
+      ("--specs=my.specs", (Refused no_reason, 0, ""));
+      ("--config", (Refused no_reason, 1, ""));
+      ("--config=my.cfg", (Refused no_reason, 0, ""));
+      ("--config-user-dir=.", (Refused no_reason, 0, ""));
+      ("--config-system-dir=.", (Refused no_reason, 0, ""));
       ("--no-default-config", (Common, 0, ""));
       (* A query prints its answer and compiles nothing. *)
-      ("-print-file-name=libc.a", (Refused "", 0, ""));
-      ("--print-file-name=libc.a", (Refused "", 0, ""));
-      ("--print-file-name", (Refused "", 1, ""));
-      ("-print-prog-name=ld", (Refused "", 0, ""));
-      ("--print-prog-name=ld", (Refused "", 0, ""));
-      ("--print-prog-name", (Refused "", 1, ""));
-      ("-print-search-dirs", (Refused "", 0, ""));
-      ("--print-search-dirs", (Refused "", 0, ""));
-      ("-print-target-triple", (Refused "", 0, ""));
-      ("-dumpmachine", (Refused "", 0, ""));
-      ("-dumpversion", (Refused "", 0, ""));
+      ("-print-file-name=libc.a", (Refused no_reason, 0, ""));
+      ("--print-file-name=libc.a", (Refused no_reason, 0, ""));
+      ("--print-file-name", (Refused no_reason, 1, ""));
+      ("-print-prog-name=ld", (Refused no_reason, 0, ""));
+      ("--print-prog-name=ld", (Refused no_reason, 0, ""));
+      ("--print-prog-name", (Refused no_reason, 1, ""));
+      ("-print-search-dirs", (Refused no_reason, 0, ""));
+      ("--print-search-dirs", (Refused no_reason, 0, ""));
+      ("-print-target-triple", (Refused no_reason, 0, ""));
+      ("-dumpmachine", (Refused no_reason, 0, ""));
+      ("-dumpversion", (Refused no_reason, 0, ""));
       ("--print-target", (Typec Print_target, 0, ""));
     ]
   in
@@ -216,7 +219,7 @@ let plan ?(emit_c = false) words =
 let planned ?emit_c words =
   match plan ?emit_c words with
   | Ok plan -> plan
-  | Error error -> failwith (Pipeline.error_message error)
+  | Error error -> failwith (Pipeline.error_message ~input:Unit error)
 
 (* A command for GCC, which gets no option of typec's own. *)
 let for_gcc = Option.map (fun (command : Pipeline.command) -> command Gcc)
@@ -472,7 +475,8 @@ let () =
     | Error (Refused_option _) -> true
     | _ -> false
   in
-  check "-std=c99" (fails [ "-std=c99"; "x.tc" ] (Unaccepted_standard "c99"));
+  check "-std=c99"
+    (fails [ "-std=c99"; "x.tc" ] (Unaccepted_standard "c99"));
   check "the last -std= counts"
     (Result.is_ok (plan [ "-std=c99"; "-std=c11"; "x.tc" ]));
   check "--emit-c -o - is stdout"
@@ -514,7 +518,8 @@ let () =
   check "the last of -fasm and -fno-asm decides"
     (keywords [ "-fno-asm"; "-fasm"; "x.tc" ] = Gnu);
   check "-fasm with an unaccepted standard"
-    (plan [ "-fasm"; "-std=c99"; "x.tc" ] = Error (Unaccepted_standard "c99"))
+    (plan [ "-fasm"; "-std=c99"; "x.tc" ]
+    = Error (Unaccepted_standard "c99"))
 
 (* --emit-c-header with the dependency options: what is written, and the
    dependency options of the -E step, which follow its own. *)
@@ -525,7 +530,8 @@ let () =
   let planned_header words =
     match plan_header words with
     | Ok header -> header
-    | Error error -> failwith (Pipeline.error_message error)
+    | Error error ->
+        failwith (Pipeline.error_message ~input:Interface error)
   in
   let output words = (planned_header words).output in
   let step words = (planned_header words).interface.preprocess Gcc in

@@ -201,6 +201,21 @@ The refusals of the command line.
   $ typec --emit-c-header -MMD room.tci -o - -MT room.h
   typec: --emit-c-header with -o - needs -MT or -MQ and -MF under -MD or -MMD: no path names the header, which the rule names as its target and beside which it goes
   [81]
+  $ typec --emit-c-header -E room.tci
+  typec: -E cannot be used with --emit-c-header: it stops after preprocessing; --emit-c-header writes the header without it
+  [81]
+  $ typec --emit-c-header -save-temps room.tci
+  typec: -save-temps cannot be used with --emit-c-header: typec keeps no intermediate files; --emit-c-header writes the header without it
+  [81]
+  $ typec --emit-c-header -print-search-dirs
+  typec: -print-search-dirs cannot be used with --emit-c-header: it asks the backend to print a fact of itself; run it without --emit-c-header
+  [81]
+  $ typec --emit-c-header -arch x86_64 -arch arm64 room.tci
+  typec: -arch cannot name several architectures (x86_64, arm64) with --emit-c-header: build each with one -arch and join the results with lipo
+  [81]
+  $ typec --emit-c-header -std=c99 room.tci
+  typec: -std=c99 cannot be used with --emit-c-header: Type-C accepts C11 and C17, in ISO or GNU form
+  [81]
   $ cp room.tci 'my room.tci'
   $ typec --emit-c-header 'my room.tci'
   typec: my room.tci cannot have a header: the last component of its path may hold only ASCII letters, digits, '.', '_', '-' and '+', since the header names it in an #include
