@@ -274,7 +274,9 @@ The options inside -Wp, and after -Xpreprocessor reach the -E step
 unseen, so the reader refuses the text they change: text without line
 markers, in which no token can be placed in its file, and text that
 keeps comments or directives. Where the refused text stands depends on
-the backend and its headers, so its location is cut.
+the backend and its headers, so its location is cut, and so is the
+header line that the case of comments quotes, as headers differ
+between builds of one backend.
 
   $ without_location() { sed 's/^.*:[0-9]*: error: //'; }
   $ typec --cc=$clang -Wp,-P -c x.tc 2>&1 | without_location
@@ -289,9 +291,8 @@ the backend and its headers, so its location is cut.
   $ typec --cc=$gcc -Xpreprocessor -P -c x.tc 2>&1 | without_location
   token before the first line marker, as when an option such as -P removes the line markers
       1 | #include <stdarg.h>
-  $ typec --cc=$clang -Wp,-C -c x.tc 2>&1 | without_location
+  $ typec --cc=$clang -Wp,-C -c x.tc 2>&1 | without_location | head -n 1
   comment in preprocessed text, as when an option such as -C keeps the comments
-      1 | /*===---- stdarg.h - Variable argument handling ----------------------------===
 
 An option that starts with -d is a dump, which changes the text as
 -dM and -dU do, so it is refused when -Wp, -Xpreprocessor or -Xclang

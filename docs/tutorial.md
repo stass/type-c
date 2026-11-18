@@ -1117,7 +1117,7 @@ get(slice(unsigned char) buf, size_t i)
 
 ```console
 $ typec -ffreestanding --trap-function=fail -c ring.tc
-$ nm -u ring.o | grep -c fail
+$ nm -u ring.o | grep -cw fail
 1
 ```
 
