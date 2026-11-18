@@ -332,14 +332,10 @@ type value =
       read : (int * value) list;
     }
 
-(* 8: enough to show what is missing, while the work and the text of the
-   error stay small whatever the size of the tree (rule 6). *)
-let max_named = 8
-
 type missing =
   | Nothing_missing
-  | Scrutinee_constructors of { named : Ctype.constructor list; more : int }
-  | Values of { named : value list; more : int }
+  | Scrutinee_constructors of Ctype.constructor Shown.few
+  | Values of value Shown.few
 
 (* A tag read on the way to a leaf, with the constructors of the branch
    taken. *)
@@ -358,11 +354,6 @@ let rec leaves_of_nothing found above position branches =
       | Node { position; branches } ->
           leaves_of_nothing found (read :: above) position branches)
     found branches
-
-(* The first [max_named] of [all] and the count of the others. *)
-let named_first all =
-  let named = List.filteri (fun index _ -> index < max_named) all in
-  (named, List.length all - List.length named)
 
 (* A position on one path by the field of each step: the holder of a
    step is the constructor that the path reads above it. *)
@@ -435,8 +426,7 @@ let missing tree =
      constructors, so it is the last branch of the root; where it is the
      only leaf of nothing, its constructors are named as such. *)
   | [ ({ at = []; holds }, _) ] ->
-      let named, more = named_first holds in
-      Scrutinee_constructors { named; more }
+      Scrutinee_constructors (Shown.few holds)
   | leaves ->
       let values =
         List.concat_map
@@ -445,14 +435,10 @@ let missing tree =
               last.holds)
           leaves
       in
-      let named, more = named_first values in
       Values
-        { named =
-            List.map
-              (fun (last, above) ->
-                value_of_reads (last :: List.map first above))
-              named;
-          more }
+        (Shown.map
+           (fun (last, above) -> value_of_reads (last :: List.map first above))
+           (Shown.few values))
 
 (* Each field adds at least one byte, so [Shown.bounded] stops a long
    field list once the text is cut. *)

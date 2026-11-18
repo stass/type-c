@@ -906,11 +906,13 @@ let is_type_c_text context (span : Tree.span) =
   File.is_type_c_text context.text.tokens.(span.first).owner
 
 (* The quoted names [quoted], after the noun [one] or [several], and the
-   count of [more] not named. *)
-let listed ~one ~several ~more quoted =
-  match List.rev quoted with
+   count of those not named. *)
+let listed ~one ~several (quoted : string Shown.few) =
+  let more = Shown.more quoted in
+  match List.rev (Shown.named quoted) with
   | _ :: _ when more > 0 ->
-      Printf.sprintf "%s %s and %d more" several (String.concat ", " quoted)
+      Printf.sprintf "%s %s and %d more" several
+        (String.concat ", " (Shown.named quoted))
         more
   | [ only ] -> one ^ " " ^ only
   | last :: before ->
@@ -998,14 +1000,13 @@ let wanted ~result sought =
 (* The binding of the field [name] of [holders], the constructors that
    have it, by a test of the first. *)
 let binding_fix name holders scrutinee =
-  let named, more = Selection.named_first holders in
   let quoted (c : Ctype.constructor) = quote (c.constructor_name :> string) in
-  match named with
+  match holders with
   | [] -> ""
   | first :: _ ->
       Printf.sprintf "; %s is %s; bind it with %s" (quote name)
-        (listed ~one:"a field of" ~several:"a field of" ~more
-           (List.map quoted named))
+        (listed ~one:"a field of" ~several:"a field of"
+           (Shown.map quoted (Shown.few holders)))
         (single_pattern_test
            (test_pattern ~bound:(String.equal name) first)
            scrutinee)
@@ -6846,13 +6847,12 @@ and refuse_missing context ~statement variant tree =
 and missing_text variant (missing : Selection.missing) =
   match missing with
   | Nothing_missing -> None
-  | Scrutinee_constructors { named; more } ->
+  | Scrutinee_constructors constructors ->
       Some
         (Printf.sprintf "the match does not cover %s of the variant %s"
-           (constructor_list (List.map constructor_name named) ~more)
+           (constructor_list (Shown.map constructor_name constructors))
            (quoted_variant variant))
-  | Values { named; more } ->
-      Some ("the match does not cover " ^ value_list named ~more)
+  | Values values -> Some ("the match does not cover " ^ value_list values)
 
 (* 4.2 rule 2: a [default] takes at least one value. *)
 and refuse_unselected_default context tree labelled ~flat =
@@ -6874,20 +6874,16 @@ and unselected_default ~flat =
 and constructor_name (constructor : Ctype.constructor) =
   constructor.constructor_name
 
-(* What a diagnostic calls the constructors [names] and [more] that it
-   does not name. *)
-and constructor_list names ~more =
-  listed ~one:"the constructor" ~several:"the constructors" ~more
-    (List.map (fun (name : Spelling.constructor) -> quote (name :> string))
+(* What a diagnostic calls the constructors [names]. *)
+and constructor_list names =
+  listed ~one:"the constructor" ~several:"the constructors"
+    (Shown.map (fun (name : Spelling.constructor) -> quote (name :> string))
        names)
 
-(* What a diagnostic calls the values [values], written as patterns, and
-   [more] that it does not name. *)
-and value_list values ~more =
-  listed ~one:"the value" ~several:"the values" ~more
-    (List.map
-       (fun value -> quote (Selection.spelling value))
-       values)
+(* What a diagnostic calls the values [values], written as patterns. *)
+and value_list values =
+  listed ~one:"the value" ~several:"the values"
+    (Shown.map (fun value -> quote (Selection.spelling value)) values)
 
 (* An arm and its bindings, which only an arm of one label may declare
    (4.1 rule 6). A binding is a non-modifiable object of its field's
@@ -6918,23 +6914,27 @@ and matched_arm context (arm : Tree.arm) labelled defaulted ~number =
     bindings }
 
 and refuse_shared_binding context arm = function
-  | _, Some { bindings = { identifier; _ } :: _; _ } ->
+  | binding_label, Some { bindings = { identifier; _ } :: _; _ } ->
       context.fail identifier.span
         (Rule.message Shared_arm
            (Printf.sprintf
               "%s share an arm, so %s may not be bound in it; give each label \
                its own arm"
-              (listed_labels context arm ~one:"the label"
-                 ~several:"the labels")
+              (listed_labels context arm ~first:binding_label
+                 ~one:"the label" ~several:"the labels")
               (quote identifier.node)))
   | _, Some { bindings = []; _ } | _, None -> ()
 
-(* The labels of [arm] as written, each without its [case] and colon: as
-   many as a coverage message names constructors, and the count of the
-   others, so that an arm of many labels keeps the message short. *)
-and listed_labels context (arm : Tree.arm) ~one ~several =
-  let named, more = Selection.named_first arm.node.labels in
-  listed ~one ~several ~more (List.map (quoted_label context) named)
+(* The labels of [arm] as written, each without its [case] and colon, as
+   many as a message names, [first] before the others where given, so
+   that a long arm still shows the label the message is about. *)
+and listed_labels ?first context (arm : Tree.arm) ~one ~several =
+  let labels =
+    match first with
+    | Some label -> label :: List.filter (( != ) label) arm.node.labels
+    | None -> arm.node.labels
+  in
+  listed ~one ~several (Shown.map (quoted_label context) (Shown.few labels))
 
 and quoted_label context (label : Tree.arm_label) =
   match label.node with

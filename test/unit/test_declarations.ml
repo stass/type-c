@@ -1610,7 +1610,7 @@ let matching () =
     "the labels 'C(x)' and 'B(_, _)' share an arm, so 'x' may not be bound \
      in it; give each label its own arm [shared-arm-binding]";
   match_error "match (v) { case A: break; default: case C(x): break; }"
-    "the labels 'default' and 'C(x)' share an arm, so 'x' may not";
+    "the labels 'C(x)' and 'default' share an arm, so 'x' may not";
   match_error "match (v) { case A: break; case B(_, _): break; }"
     "the match does not cover the constructor 'C' of the variant 'e' \
      [match-coverage]";

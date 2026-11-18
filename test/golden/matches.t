@@ -232,7 +232,7 @@ Each refusal is located at the construct it concerns.
   > }
   > EOF
   $ ./golden.exe shared.tc
-  shared.tc:5: error: the labels 'A' and 'B(i)' share an arm, so 'i' may not be bound in it; give each label its own arm [shared-arm-binding]
+  shared.tc:5: error: the labels 'B(i)' and 'A' share an arm, so 'i' may not be bound in it; give each label its own arm [shared-arm-binding]
   [1]
 
 A pragma that a macro leaves around a pattern is no part of the label
@@ -257,7 +257,7 @@ that the message quotes:
   > }
   > EOF
   $ ./golden.exe shared_pragma.tc
-  shared_pragma.tc:11: error: the labels 'A' and 'B( i )' share an arm, so 'i' may not be bound in it; give each label its own arm [shared-arm-binding]
+  shared_pragma.tc:11: error: the labels 'B( i )' and 'A' share an arm, so 'i' may not be bound in it; give each label its own arm [shared-arm-binding]
   [1]
 
 A C programmer's shared case, with each label binding the same name:
@@ -507,7 +507,7 @@ constructors, and counts the others:
   > }
   > EOF
   $ ./golden.exe many_shared.tc
-  many_shared.tc:5: error: the labels 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H' and 2 more share an arm, so 'j' may not be bound in it; give each label its own arm [shared-arm-binding]
+  many_shared.tc:5: error: the labels 'J(j)', 'A', 'B', 'C', 'D', 'E', 'F', 'G' and 2 more share an arm, so 'j' may not be bound in it; give each label its own arm [shared-arm-binding]
   [1]
 
 A C fall-through into the next arm, and a last arm without its break,

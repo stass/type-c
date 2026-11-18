@@ -14,6 +14,22 @@ val cut : string -> string
     else its first bytes, cut at a character boundary, and ["..."], at
     most {!max_length} bytes in all. *)
 
+val max_named : int
+(** The most entries of a list that a diagnostic names. *)
+
+type 'a few
+(** A list that a diagnostic names: its first {!max_named} entries and
+    the count of the others. Only {!few} makes one, so no message lists
+    more. *)
+
+val few : 'a list -> 'a few
+val map : ('a -> 'b) -> 'a few -> 'b few
+(** [map f few] applies [f] to the entries named only, so building what
+    a message names takes work that does not grow with the whole list. *)
+
+val named : 'a few -> 'a list
+val more : 'a few -> int
+
 val bounded : ((string -> unit) -> unit) -> string
 (** [bounded write] is the text that [write add] passes to [add], cut as
     {!cut} cuts it. [add] stops [write] once the text is longer than

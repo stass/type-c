@@ -53,8 +53,8 @@ let select scrutinee labels ~default =
 let missing_values tree =
   match Selection.missing tree with
   | Nothing_missing -> []
-  | Values { named; _ } -> named
-  | Scrutinee_constructors { named = constructors; _ } ->
+  | Values values -> Shown.named values
+  | Scrutinee_constructors constructors ->
       List.map
         (fun (constructor : Ctype.constructor) ->
           Selection.Holds
@@ -62,7 +62,7 @@ let missing_values tree =
               through_pointer = false;
               read = []
             })
-        constructors
+        (Shown.named constructors)
 
 let spelling = Selection.spelling
 
@@ -128,8 +128,10 @@ let flat () =
   let tree = select e [ case_b ] ~default:false in
   check "A and C share the missing leaf"
     (match Selection.missing tree with
-     | Scrutinee_constructors { named = [ first; second ]; more = 0 } ->
-         first == a && second == c
+     | Scrutinee_constructors constructors -> (
+         match (Shown.named constructors, Shown.more constructors) with
+         | [ first; second ], 0 -> first == a && second == c
+         | _ -> false)
      | _ -> false);
   check "a flat match is one node"
     (List.for_all
@@ -414,17 +416,17 @@ let missing_in_linear_work () =
    | Some growth ->
        check ("what a match misses is named in linear work: " ^ growth) false);
   check "the first values missing are named and the others counted"
-    (let first = List.init Selection.max_named (fun i -> i + 1) in
+    (let first = List.init Shown.max_named (fun i -> i + 1) in
      match Selection.missing (wide_miss small_miss) with
-     | Values { named; more } ->
-         List.map spelling named
+     | Values values ->
+         List.map spelling (Shown.named values)
          = List.map (fun i -> Shown.cut (wide_value small_miss i)) first
-         && more = small_miss - 1 - Selection.max_named
+         && Shown.more values = small_miss - 1 - Shown.max_named
      | Nothing_missing | Scrutinee_constructors _ -> false);
   check "a few values missing are each named"
     (match Selection.missing (wide_miss 4) with
-     | Values { named; more = 0 } ->
-         List.map spelling named
+     | Values values when Shown.more values = 0 ->
+         List.map spelling (Shown.named values)
          = [ wide_value 4 1; wide_value 4 2; wide_value 4 3 ]
      | Nothing_missing | Scrutinee_constructors _ | Values _ -> false)
 
@@ -482,14 +484,14 @@ let missing_of_many_fields () =
          false);
   check "the eight values of the deep leaf are named, cut short"
     (match Selection.missing (tree small_big) with
-     | Values { named; more = 0 } ->
-         List.length named = 8
+     | Values values when Shown.more values = 0 ->
+         List.length (Shown.named values) = 8
          && List.for_all
               (fun value ->
                 let spelled = Selection.spelling value in
                 String.length spelled <= Shown.max_length
                 && String.ends_with ~suffix:"..." spelled)
-              named
+              (Shown.named values)
      | Nothing_missing | Scrutinee_constructors _ | Values _ -> false)
 
 (* The values missing at several leaves, in the tree's order: in
@@ -518,20 +520,23 @@ let wording () =
   in
   check "nothing missing has no error"
     (text Nothing_missing = None);
+  (* Eight names of 'A', the most a message names. *)
+  let eight_named = String.concat ", " (List.init 8 (fun _ -> "'A'")) in
   check "one constructor missing"
-    (text (Scrutinee_constructors { named = [ a ]; more = 0 })
+    (text (Scrutinee_constructors (Shown.few [ a ]))
     = Some "the match does not cover the constructor 'A' of the variant 'e'");
   check "constructors missing beyond those named"
-    (text (Scrutinee_constructors { named = [ a; c ]; more = 3 })
+    (text (Scrutinee_constructors (Shown.few (List.init 11 (fun _ -> a))))
     = Some
-        "the match does not cover the constructors 'A', 'C' and 3 more of \
-         the variant 'e'");
+        ("the match does not cover the constructors " ^ eight_named
+       ^ " and 3 more of the variant 'e'"));
   check "two values missing"
-    (text (Values { named = [ value a; value c ]; more = 0 })
+    (text (Values (Shown.few [ value a; value c ]))
     = Some "the match does not cover the values 'A' and 'C(_)'");
   check "one value named and one more"
-    (text (Values { named = [ value a ]; more = 1 })
-    = Some "the match does not cover the values 'A' and 1 more")
+    (text (Values (Shown.few (List.init 9 (fun _ -> value a))))
+    = Some
+        ("the match does not cover the values " ^ eight_named ^ " and 1 more"))
 
 (* A match without nested patterns of [labels] labels over as many
    constructors takes steps linear in their number. *)

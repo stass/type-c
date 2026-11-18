@@ -19,6 +19,20 @@ let cut text =
     let kept = boundary (max_length - String.length ellipsis) in
     String.sub text 0 kept ^ ellipsis
 
+(* 8: enough to show what is missing or shared, while the work and the
+   text of a message stay small whatever the size of what it lists. *)
+let max_named = 8
+
+type 'a few = { named : 'a list; more : int }
+
+let few all =
+  let named = List.filteri (fun index _ -> index < max_named) all in
+  { named; more = List.length all - List.length named }
+
+let map f { named; more } = { named = List.map f named; more }
+let named few = few.named
+let more few = few.more
+
 let bounded write =
   (* Each call has its own exception, so a write within another's cannot
      stop the outer one. *)

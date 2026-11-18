@@ -48,14 +48,6 @@ jump into or out of a deferred statement. No message cites a design
 section.
 The items are ordered by how often real code meets them.
 
-- [Medium] `Expressions.listed` names every entry it is given, so the
-  bound on a message's list (`Selection.max_named`, through
-  `Selection.named_first`) holds only where each caller cuts the list
-  first. Make an uncut list impossible to pass (an abstract pair that
-  only `named_first` builds), and move the cap, whose comment speaks of
-  coverage alone, next to `Shown.cut` as a bound on message text. The
-  shared-arm refusal may leave out the label that binds when it is past
-  the eighth; name that one first.
 - [Low] The refusal of a constructor where no variant with it is
   expected names the variant by its declaration's name, and its fix
   qualifies the constructor with that name, though an ordinary
