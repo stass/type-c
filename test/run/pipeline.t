@@ -330,7 +330,8 @@ so that build gets a directory of its own.
   > then
   >   TMPDIR=$universal_tmp typec --cc=$clang -arch x86_64 -arch arm64 \
   >     -c twice.c -o out/fat.o &&
-  >   lipo out/fat.o -verify_arch x86_64 arm64
+  >   archs=$(lipo -archs out/fat.o) && test "$archs" = "x86_64 arm64" ||
+  >     echo "fat.o holds $archs"
   > fi
 
 The keywords follow the dialect as in GCC and Clang: asm and typeof are
