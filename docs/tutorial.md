@@ -924,6 +924,81 @@ at(slice__Kc s, unsigned long i)
 }
 ```
 
+A check that fails stops the program at the trap: the system kills it
+with a signal, SIGILL on x86-64, and the shell reports an illegal
+instruction, not the line. A debugger names the line. Built with `-g`,
+the program stops in the debugger at the check that failed, and since
+the C that typec emits keeps the lines of the `.tc` files, the location
+is one of theirs: the line of the `.tc` file, with a column of the
+emitted C. `peek.tc` reads one character past the end of `"port"`:
+
+<!-- file: peek.tc -->
+```c
+#include <stdio.h>
+
+char at(str s, unsigned long i);
+
+int
+main(void)
+{
+	printf("%c\n", at("port", 4));
+	return (0);
+}
+```
+
+```console
+$ typec -g -o peek peek.tc at.tc
+```
+
+<!-- console: lldb -->
+```console
+$ lldb --batch -o run ./peek | grep -o 'at\.tc:[0-9]*'
+at.tc:4
+```
+
+`lldb ./peek` and then `run` shows the same stop with the source around
+it; the `grep` keeps only the location from lldb's report.
+
+Outside a debugger, the program can at least say why it stopped.
+`--trap-function=on_trap` makes every trap call `on_trap`, which the
+program supplies, before `__builtin_trap()`. It takes no arguments, so
+it cannot know the line; it says that a check failed, and ends in
+`abort()`, whose stack a debugger still shows:
+
+<!-- file: on_trap.c -->
+```c
+#include <stdio.h>
+#include <stdlib.h>
+
+/* Every trap of the .tc files calls this: a check failed. */
+_Noreturn void
+on_trap(void)
+{
+	fputs("peek: a checked index or tag failed\n", stderr);
+	abort();
+}
+```
+
+```console
+$ typec -g --trap-function=on_trap -o peek peek.tc at.tc on_trap.c
+```
+
+<!-- console: lldb -->
+```console
+$ lldb --batch -o run -k bt ./peek | grep -o -e 'peek: [a-z ]*' -e 'at\.tc:[0-9]*'
+peek: a checked index or tag failed
+at.tc:4
+```
+
+Run alone, the program prints the message and aborts. Under lldb,
+`-k bt` prints the backtrace once the abort stops the program: below
+`abort` it holds `on_trap`, then `__tc_trap`, the function at `<typec>`
+through which typec calls it, then `at` at `at.tc:4` and `main`; the
+`grep` keeps the message and the line of `at`. On macOS, `on_trap` can
+also print the stack itself with `backtrace()` and
+`backtrace_symbols_fd()` of `<execinfo.h>`, which name the functions
+but not the lines.
+
 The pitfalls follow from what a slice is: a pointer and a count, and
 no more. It owns nothing and keeps nothing alive, so the slice of a local
 array that a function returns dangles as the pointer would. A `str` is
@@ -1016,11 +1091,11 @@ port 8080, timeout 30 s, debug 1
 `TYPEC_CC` or `--cc=` names the C compiler that `typec` hands the C to
 ([Choosing the backend](../README.md#choosing-the-backend)).
 
-A freestanding program has no library to report a trap. With
-`--trap-function=NAME`, each trap of the emitted C, a bad index or a
-corrupt tag, calls a `_Noreturn void NAME(void)` that the program
-supplies, so that it can report the failure, instead of executing the
-trap instruction alone:
+A freestanding program has no library to report a trap, and no
+debugger may be at hand. The `--trap-function` of chapter 6 is its
+report: each trap of the emitted C, a bad index or a corrupt tag, calls
+the `_Noreturn void NAME(void)` that the program supplies instead of
+executing the trap instruction alone:
 
 <!-- file: ring.tc -->
 ```c

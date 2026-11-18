@@ -18,7 +18,10 @@
 #   "typec --emit-c NAME", without its line markers and the assertions
 #   that typec appends; the comparison is of tokens, so that the block
 #   can be laid out for reading;
-# - "<!-- console: FAMILY -->" runs the console block on FAMILY only;
+# - "<!-- console: FAMILY -->" runs the console block on FAMILY only,
+#   and "<!-- console: lldb -->" only where lldb debugs a program of
+#   BACKEND (lldb_present in backends.sh, which reports the skip), so
+#   that a host without it skips the block, commands and output alike;
 # - "<!-- untested: REASON -->" skips the c block, which shows Type-C
 #   that typec does not build yet;
 # - "<!-- stage: NAME -->", NAME of letters, digits and "_", starts a
@@ -44,13 +47,20 @@
 # kinds, such as sh, are not run.
 
 if [ "$1" = --files ]; then
-  family= readme=$2 work=$3
+  family= lldb= readme=$2 work=$3
 else
-  family=$1 backend=$2 readme=$3 work=work-$1
+  family=$1 backend=$2 readme=$3 lldb= work=work-$1
   case $family in
   clang | gcc) ;;
   *) echo "readme.sh: FAMILY is clang or gcc, not $family" >&2; exit 1 ;;
   esac
+  # Only a page with an lldb block pays for the probe.
+  if grep -q '^<!-- console: lldb -->$' "$readme"; then
+    . "$(dirname "$0")/backends.sh" || exit 1
+    if lldb_present "$backend"; then
+      lldb=yes
+    fi
+  fi
 fi
 mkdir "$work" || exit 1
 
@@ -60,7 +70,7 @@ mkdir "$work" || exit 1
 # each line where the block goes, until the closing fence. A marker
 # that does not parse, or that no fence of its kind follows, is an
 # error, so that a mistyped marker cannot drop its check.
-awk -v work="$work" -v family="$family" '
+awk -v work="$work" -v family="$family" -v lldb="$lldb" '
   function fail(message) {
     print "readme.sh: " FILENAME ":" FNR ": " message > "/dev/stderr"
     exit 1
@@ -105,7 +115,8 @@ awk -v work="$work" -v family="$family" '
       target = open_file(checked_name(marked) ".emitted")
       print staged_name(marked) > (work "/emit-c.list")
     } else if (language == "console") {
-      if (kind != "console" || marked == family)
+      if (kind != "console" || marked == family ||
+          (marked == "lldb" && lldb != ""))
         block = "console"
     }
   }
@@ -159,8 +170,8 @@ awk -v work="$work" -v family="$family" '
     marked = $0
     sub(/^<!-- [a-z-]+: /, "", marked)
     sub(/ -->$/, "", marked)
-    if (marker == "console" && marked != "clang" && marked != "gcc")
-      fail("a console marker for neither clang nor gcc: " marked)
+    if (marker == "console" && marked !~ /^(clang|gcc|lldb)$/)
+      fail("a console marker for none of clang, gcc and lldb: " marked)
   }
 ' "$readme" || exit 1
 if [ -z "$family" ]; then

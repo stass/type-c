@@ -1561,6 +1561,10 @@ names, or the one on the `PATH`, where present, and Clang for
 `thumbv7m-none-eabi` where Clang has that target. The rule that reports `-m32` also prints which of
 the two Arm backends ran and which were skipped, and fails when one is
 missing and `TYPEC_TEST_REQUIRE_ARM` is set to a non-empty value.
+`tutorial.t` runs its lldb examples where the `lldb` on the `PATH`
+debugs the programs of both backends; the same rule prints whether they
+run on this host, and fails when they do not and
+`TYPEC_TEST_REQUIRE_LLDB` is set to a non-empty value.
 There are no other dependencies.
 
 ```sh
@@ -1578,10 +1582,10 @@ and `dune test`, then builds the typing oracle and runs its tests, which
 switch `tools` and fails, saying where to find how to create it, when the
 switch is missing. Before its steps it prints that report, which
 `dune test` writes only to the log, so a skipped Arm backend shows, and
-stops where `TYPEC_TEST_REQUIRE_ARM` or `TYPEC_TEST_REQUIRE_M32` names
-one that is missing. It prints the end of the log when a step fails; the
-variables in the header of the script set the opam root, the oracle's build
-directory and the log.
+stops where `TYPEC_TEST_REQUIRE_ARM`, `TYPEC_TEST_REQUIRE_M32` or
+`TYPEC_TEST_REQUIRE_LLDB` names one that is missing. It prints the end
+of the log when a step fails; the variables in the header of the script
+set the opam root, the oracle's build directory and the log.
 
 Library tests are in `test/unit`; the parser's are tables of C text and
 the structural dump of its tree (`test/support/tree_dump.ml`) or its

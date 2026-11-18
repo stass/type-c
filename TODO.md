@@ -189,11 +189,6 @@ The items are ordered by how often real code meets them.
   *' does not convert to 'double' without a cast", naming neither the
   argument nor the callee. Proposed: "the argument 'v' of 'put' is of
   type 'char *', not 'double'". Source: probe.
-- [Low] An index out of range of a slice traps at run time with
-  "Illegal instruction" and no location, where C's `-Warray-bounds`
-  names the line for an array. Decide whether the tutorial's section on
-  checked indexing shows `--trap-function` with a handler that prints
-  the location, or the default trap carries one. Source: probe.
 
 ## Driver
 

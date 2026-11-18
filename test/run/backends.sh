@@ -9,7 +9,9 @@
 # TYPEC_TEST_ARM_GCC names the arm-none-eabi-gcc of the Arm tests,
 # short_enums.t and c_header.t; unset, it is the one on the PATH.
 # TYPEC_TEST_REQUIRE_ARM, when set and not empty, declares that the host
-# has both Arm backends of those tests.
+# has both Arm backends of those tests. TYPEC_TEST_REQUIRE_LLDB, when
+# set and not empty, declares that lldb runs on the host for the
+# examples of docs/tutorial.md that use it.
 
 clang=${TYPEC_TEST_CLANG:-/usr/bin/clang}
 gcc=${TYPEC_TEST_GCC:-/usr/local/bin/gcc-16}
@@ -24,6 +26,23 @@ arm_clang_present() {
 arm_gcc_present() {
   command -v "$arm_gcc" > /dev/null 2>&1
 }
+
+# lldb_present CC: whether the lldb on the PATH stops a program that CC
+# built with -g at the line of its trap, as the lldb examples of the
+# tutorial need: lldb may be missing, may not read the debug information
+# of CC, or the host may not let it debug. The directory is made in the
+# current one, which runs programs where a temporary one may not. The
+# subshell keeps the variables out of the tests.
+lldb_present() (
+  lldb_dir=$(mktemp -d ./lldb.XXXXXX) || return 1
+  printf 'int main(void) { __builtin_trap(); }\n' > "$lldb_dir/probe.c"
+  "$1" -g -o "$lldb_dir/probe" "$lldb_dir/probe.c" > /dev/null 2>&1 &&
+    lldb --batch -o run "$lldb_dir/probe" < /dev/null 2>&1 |
+    grep -q 'at probe\.c:1'
+  lldb_status=$?
+  rm -rf "$lldb_dir"
+  return $lldb_status
+)
 
 # The configurations of the Arm backends present, one per line: a
 # backend, its target option, the option of an enumeration
@@ -85,6 +104,7 @@ backends_report() (
   report_status=0
   m32_report || report_status=1
   arm_report || report_status=1
+  lldb_report || report_status=1
   return $report_status
 )
 
@@ -133,6 +153,23 @@ arm_report() (
     return 1
   fi
 )
+
+# Prints whether the lldb examples of the tutorial run on this host or
+# are skipped, and fails when they are skipped and
+# TYPEC_TEST_REQUIRE_LLDB is set.
+lldb_report() {
+  if lldb_present "$clang" && lldb_present "$gcc"; then
+    echo "backends.sh: the lldb examples of the tutorial run lldb"
+    return 0
+  fi
+  echo "backends.sh: the lldb examples of the tutorial skip lldb," \
+    "which is not found or does not debug the programs of both backends"
+  if [ -n "${TYPEC_TEST_REQUIRE_LLDB:-}" ]; then
+    echo "backends.sh: TYPEC_TEST_REQUIRE_LLDB is set, but lldb" \
+      "does not run" >&2
+    return 1
+  fi
+}
 
 # compile_emitted CC FILE OPTION...: checks the preprocessed text in FILE
 # with backend CC under the strictest user options and OPTION..., reading
