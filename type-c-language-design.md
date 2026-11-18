@@ -4477,8 +4477,10 @@ field `owned` would have 24 bytes in the unit and 32 in the client
 The header therefore writes its lowered text in *runs*, each in a
 *macro bracket*. The lowered text is all that stands between the
 macro probe (below) and the header's `#endif`: the declarations of
-`M.tci` with their pragma lines, the instances with their packing
-brackets, the enumeration assertion and the probe of 10.3. Its include
+`M.tci` with their pragma lines, the instances with their guards and
+packing brackets, the trap's prototype and definition where lowering
+writes a trap, the layout typedefs, the enumeration assertion and the
+probe of 10.3. Its include
 lines divide it into runs, and a header with no include line has one
 run. The writer builds a run whole, collecting the identifiers of the
 tokens that it writes, and then writes the run in its macro bracket:
@@ -4495,6 +4497,18 @@ charged to the output limit and counted by `--stats` (3.5 rule 7):
 struct room { char bytes[(CAPACITY + 1)]; };
 #pragma pop_macro("CAPACITY")
 ```
+
+The writer meets the lowered text as tokens by reading it again, with
+the reader that read the step's output. Lowering's edits carry text,
+as a unit's emission writes it, and the second reading gives the
+writer each token, include line and guard line of the kept and the
+generated text alike, through one reader. A token is a span of the
+text that it was read from, so edits that carried their tokens would
+need tokens of another kind, which every generator of the lowered text
+named above would build beside the text that a unit's emission writes,
+or both emissions would print their text from tokens: either costs
+more than one linear pass. Lowered text that the reader refuses is a
+bug of `typec`'s.
 
 While the client reads a run, no identifier in it names a macro, so
 its preprocessor passes each token on as it stands, and the client

@@ -344,11 +344,6 @@ the package, in the order of its commits:
 - [Low] `Pipeline.plan_header` fills a `shape` with
   values of a translation to reuse its helpers, and `Invocation` defines
   `given` twice: factor them.
-- [Medium] The writer reads the lowered text of the interface again
-  (`Reader.read_interface` of `Emitter.applied`) to meet each token
-  that it writes as a token, since the text of an edit is a string.
-  Edits that carried their tokens would let the writer take them
-  directly; weigh that against the second read once instances land.
 
 ## Target model
 
