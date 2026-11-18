@@ -48,12 +48,6 @@ jump into or out of a deferred statement. No message cites a design
 section.
 The items are ordered by how often real code meets them.
 
-- [Medium] `try-name-capture` on `T *p = try f(sizeof(*p));` says
-  "'p' is not visible where lowering writes the text", naming lowering
-  and no remedy. Pilot B met it 4 times and wrote `sizeof(T)` each
-  time, which no longer follows the type of `p`. Proposed: "'p' is
-  declared by this declaration, so its initializer's try cannot name
-  it; write 'T *p; p = try f(sizeof(*p));'". Source: Pilot B; probe.
 - [Medium] Conversion hints for a variant. The hint of a refused
   conversion (`Expressions.record_conversion_hint`) looks only at which
   side is a structure: `option(point) o = p;` gets no "make one with a

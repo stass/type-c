@@ -1912,7 +1912,7 @@ initialiser, so the operand would name another object there, or none.
   > }
   > EOF
   $ ./golden.exe own_declarator.tc
-  own_declarator.tc:5: error: 'n' denotes another entity where lowering writes the text, the one declared at own_declarator.tc:3 [try-name-capture]
+  own_declarator.tc:5: error: 'n' is declared by the declaration that holds this try, and the try runs before that declaration, so its operand cannot use 'n'; declare 'n' first, in a declaration of its own, and give it the try's value after [try-name-capture]
   [1]
 
   $ cat > undeclared_there.tc <<'EOF'
@@ -1923,7 +1923,43 @@ initialiser, so the operand would name another object there, or none.
   > }
   > EOF
   $ ./golden.exe undeclared_there.tc
-  undeclared_there.tc:3: error: 'n' is not visible where lowering writes the text [try-name-capture]
+  undeclared_there.tc:3: error: 'n' is declared by the declaration that holds this try, and the try runs before that declaration, so its operand cannot use 'n'; declare 'n' first, in a declaration of its own, and give it the try's value after [try-name-capture]
+  [1]
+
+  $ cat > sized_by_itself.tc <<'EOF'
+  > typedef struct { int x; } T;
+  > result(void *, int) alloc(unsigned long);
+  > result(int, int) h(void) {
+  >   T *p = try alloc(sizeof(*p));
+  >   p->x = 1;
+  >   return Ok(p->x);
+  > }
+  > EOF
+  $ ./golden.exe sized_by_itself.tc
+  sized_by_itself.tc:4: error: 'p' is declared by the declaration that holds this try, and the try runs before that declaration, so its operand cannot use 'p'; declare 'p' first, in a declaration of its own, and give it the try's value after [try-name-capture]
+  [1]
+
+  $ cat > array_by_itself.tc <<'EOF'
+  > result(int, int) rd(unsigned long);
+  > result(int, int) h(void) {
+  >   int a[4] = { try rd(sizeof(a)) };
+  >   return Ok(a[0]);
+  > }
+  > EOF
+  $ ./golden.exe array_by_itself.tc
+  array_by_itself.tc:3: error: 'a' is declared by the declaration that holds this try, and the try runs before that declaration, so its operand cannot use 'a'; declare 'a' first, in a declaration of its own, and give it the try's value after [try-name-capture]
+  [1]
+
+  $ cat > tag_in_left.tc <<'EOF'
+  > result(int, int) g(unsigned long);
+  > result(int, int) h(void) {
+  >   int a[8];
+  >   a[sizeof(struct S { int x; })] = try g(sizeof(struct S));
+  >   return Ok(a[0]);
+  > }
+  > EOF
+  $ ./golden.exe tag_in_left.tc
+  tag_in_left.tc:4: error: the tag 'S' is declared before this try in the statement or declaration that holds it, and the try runs before all of that, so its operand cannot use the tag 'S'; declare the tag 'S' before that statement or declaration [try-name-capture]
   [1]
 
 The left operand of an assignment is read before the try, so the
@@ -1939,7 +1975,7 @@ nothing in the scope around it that the left operand would read.
   > }
   > EOF
   $ ./golden.exe left_declares.tc
-  left_declares.tc:4: error: 'K' is not visible where lowering writes the text [try-name-capture]
+  left_declares.tc:4: error: 'K' is declared before this try in the statement or declaration that holds it, and the try runs before all of that, so its operand cannot use 'K'; declare 'K' before that statement or declaration [try-name-capture]
   [1]
 
   $ cat > operand_declares.tc <<'EOF'

@@ -383,20 +383,26 @@ let same_tag context first second =
   | Some a, Some b -> same_named_tag a b
   | Some _, None | None, _ -> false
 
-let check_tag context place span name tag =
+(* Whether the tag of [name] at the place is [tag]. *)
+let sees_tag context place name tag =
   match tag_at place name with
-  | Some (Source (Tag found)) when found = tag || same_tag context tag found ->
-      ()
-  | Some cited ->
-      refuse span
-        (Printf.sprintf
-           "the tag %s denotes another tag where lowering writes the text, %s"
-           (quote name) (cite context cited))
-  | None ->
-      refuse span
-        (Printf.sprintf
-           "the tag %s is not visible where lowering writes the text"
-           (quote name))
+  | Some (Source (Tag found)) -> found = tag || same_tag context tag found
+  | Some (Source (Ordinary _ | Label _) | Lowered _) | None -> false
+
+let check_tag context place span name tag =
+  if not (sees_tag context place name tag) then
+    match tag_at place name with
+    | Some cited ->
+        refuse span
+          (Printf.sprintf
+             "the tag %s denotes another tag where lowering writes the text, \
+              %s"
+             (quote name) (cite context cited))
+    | None ->
+        refuse span
+          (Printf.sprintf
+             "the tag %s is not visible where lowering writes the text"
+             (quote name))
 
 let refuse_other_label (use : name) cited =
   refuse use.span
@@ -480,7 +486,63 @@ let check_redeclared context window (use : name) (used : Entity.t) =
            (quote use.name) (location_of context index))
   | None -> ()
 
+(* Design 5.1 rule 3: a try runs before the rest of its holder, so its
+   operand names nothing that the holder declares before it, which is
+   what the window holds where the place of writing precedes the try. A
+   label has function scope and is checked at the place instead. *)
+let holder_declares context text place window (use : name) =
+  let in_window index = window.first <= index && index < window.after in
+  let precedes = place_precedes text place in
+  match (text.kind, use.declaration) with
+  | Try_operand, Ordinary (In_tree (Ordinary_at index)) ->
+      precedes && in_window index
+  (* A tag declared before the holder and completed in it is checked as
+     a completion. *)
+  | Try_operand, Tag (Tag_at index as tag) ->
+      precedes && in_window index
+      && not (sees_tag context place use.name tag)
+  | Try_operand, (Ordinary (Builtin _) | Label _)
+  | ( (Generic_definition | Deferred_statement | Return_operand
+      | Array_operand),
+      _ ) ->
+      false
+
+let is_object_entity context reference =
+  match context.entity reference with
+  | Some { declared = Object _; _ } -> true
+  | Some { declared = Function _ | Typedef _ | Enumerator _; _ } | None ->
+      false
+
+(* A holder that declares an object is a declaration of that one object
+   (design 5.1 rule 3), so the object is the one its try initialises. *)
+let refuse_own_declarator (use : name) =
+  let name = quote use.name in
+  refuse use.span
+    (Printf.sprintf
+       "%s is declared by the declaration that holds this try, and the try \
+        runs before that declaration, so its operand cannot use %s; declare \
+        %s first, in a declaration of its own, and give it the try's value \
+        after"
+       name name name)
+
+let refuse_declared_before_try (use : name) described =
+  refuse use.span
+    (Printf.sprintf
+       "%s is declared before this try in the statement or declaration that \
+        holds it, and the try runs before all of that, so its operand cannot \
+        use %s; declare %s before that statement or declaration"
+       described described described)
+
+let refuse_holder_declared context (use : name) =
+  match use.declaration with
+  | Ordinary reference when is_object_entity context reference ->
+      refuse_own_declarator use
+  | Ordinary _ | Label _ -> refuse_declared_before_try use (quote use.name)
+  | Tag _ -> refuse_declared_before_try use ("the tag " ^ quote use.name)
+
 let check_use context window text place (use : name) =
+  if holder_declares context text place window use then
+    refuse_holder_declared context use;
   if is_outside text use.declaration then
     match use.declaration with
     | Ordinary reference ->
