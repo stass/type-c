@@ -40,7 +40,15 @@ let name =
   | Some name -> name
   | None -> failwith "m.tci has no name"
 
-let written text = Header.write name (read_ok text)
+(* The header of the interface [name] that [read] holds, held to the
+   output limit of its unit. *)
+let written_as name (read : Reader.interface) =
+  let write output = Header.write output ~source:"m.tci" name read in
+  match Emitter.limited read.unit ~trap:Trap.builtin write with
+  | Ok (written, _) -> written
+  | Error error -> Error error
+
+let written text = written_as name (read_ok text)
 
 let header text =
   match written text with
@@ -386,9 +394,7 @@ let test_names () =
     match Header.name_of_path path with
     | None -> None
     | Some name -> (
-        match
-          Header.write name (read_ok "# 1 \"m.tci\"\n#define M\n")
-        with
+        match written_as name (read_ok "# 1 \"m.tci\"\n#define M\n") with
         | Ok header -> Some (List.nth (lines header) 4)
         | Error _ -> None)
   in
@@ -399,6 +405,78 @@ let test_names () =
   check "another suffix" (Header.name_of_path "a.tc" = None);
   check "a directory may hold any byte"
     (Option.is_some (Header.name_of_path "a b/\"c\"/m.tci"))
+
+(* The output limit (design 3.5 rule 7): the unit is charged its own
+   text first, then a filler piece of [filler] bytes and the blank after
+   it, so the header has [room] bytes left, and then each line of the
+   header and its line break as it is written. *)
+let charged_with_room (read : Reader.interface) room =
+  let limit = Typec_sema.Output_limit.of_unit read.unit in
+  let filler = limit - Reader.length read.unit - room - 1 in
+  let write output =
+    let start = { Location.file = "m.tci"; line = 1; flags = No_flags } in
+    ignore (Emitter.generated output start (String.make filler 'a'));
+    Header.write output ~source:"m.tci" name read
+  in
+  Emitter.limited read.unit ~trap:Trap.builtin write
+
+let is_limit_refusal (error : Reader.error) =
+  String.starts_with
+    ~prefix:"the C text of the unit would pass the output limit"
+    error.message
+
+let refused_at_line line = function
+  | Error (error : Reader.error) ->
+      is_limit_refusal error && error.location.line = line
+  | Ok _ -> false
+
+(* The lines of a macro bracket, which the macro probe's own push and
+   pop of its probe are not. *)
+let is_bracket_line line =
+  (String.starts_with ~prefix:"#pragma push_macro(" line
+  || String.starts_with ~prefix:"#pragma pop_macro(" line
+  || String.starts_with ~prefix:"#undef " line)
+  && not (contains line "__tc_macro_probe__")
+
+let line_bytes lines =
+  List.fold_left (fun bytes line -> bytes + String.length line + 1) 0 lines
+
+let test_output_limit () =
+  let text = "# 1 \"m.tci\"\n\nint alpha;\nint beta;\n" in
+  let read = read_ok text in
+  let header = header text in
+  let header_bytes = String.length header in
+  check "every byte of the header is charged after the unit's text"
+    (match
+       Emitter.limited read.unit ~trap:Trap.builtin (fun output ->
+           Header.write output ~source:"m.tci" name read)
+     with
+     | Ok (Ok _, charged) -> charged = Reader.length read.unit + header_bytes
+     | Ok (Error _, _) | Error _ -> false);
+  check "a header that takes the rest of the limit is written"
+    (match charged_with_room read header_bytes with
+     | Ok (Ok written, charged) ->
+         written = header
+         && charged = Typec_sema.Output_limit.of_unit read.unit
+     | Ok (Error _, _) | Error _ -> false);
+  (* The last line, the guard's #endif, stands for no line of the
+     interface. *)
+  check "a byte less is refused at the interface's first line"
+    (refused_at_line 1 (charged_with_room read (header_bytes - 1)));
+  let skeleton_bytes =
+    header_bytes - line_bytes (body header) - line_bytes [ "#endif"; "#endif" ]
+  in
+  check "a bracket's first line is refused at its run's first line"
+    (refused_at_line 2 (charged_with_room read skeleton_bytes));
+  let bracket_bytes =
+    line_bytes (List.filter is_bracket_line (lines header))
+  in
+  check "a header whose macro brackets alone pass the limit is refused"
+    (bracket_bytes > 0
+    &&
+    match charged_with_room read (header_bytes - bracket_bytes) with
+    | Error error -> is_limit_refusal error
+    | Ok _ -> false)
 
 let () =
   test_include_lines ();
@@ -411,4 +489,5 @@ let () =
   test_literals ();
   test_refusals ();
   test_names ();
+  test_output_limit ();
   if !failures > 0 then exit 1

@@ -601,6 +601,18 @@ let header_text output ~target ~header_module edits =
       @ Assumptions.enumeration target ~suffix
       @ probes ~suffix edits)
 
+(* A text written from the lowered text holds lines that no edit made,
+   so each line is charged here as it is added to the text. *)
+let lines output write =
+  let text = Buffer.create 4096 in
+  let add location line =
+    charge output location (String.length line + 1);
+    Buffer.add_string text line;
+    Buffer.add_char text '\n'
+  in
+  write add;
+  Buffer.contents text
+
 let emit (unit : Reader.t) { trap; edits; assertions } =
   let edits = in_order edits in
   List.iter (check_one_file unit.tokens) edits;

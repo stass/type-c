@@ -308,3 +308,12 @@ val header_text :
     [struct __tc_pack_probe_1__M]
     and [struct __tc_pack_probe_2__M] for the module [M].
     [Invalid_argument] as for {!emit}. *)
+
+val lines :
+  output -> ((Typec_cpp.Location.t -> string -> unit) -> unit) -> string
+(** [lines output write] is the text that [write add] adds line by line,
+    each line ended by a line break: the text that typec writes from the
+    lowered text, such as the header of an interface (design 9.3). Each
+    line and its break are charged to the output limit of [output] at
+    the location given with the line, before the line is added, so every
+    byte of the text is charged. *)

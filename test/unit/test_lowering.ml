@@ -939,6 +939,33 @@ let output_limit () =
   under_limit "fewer nested array operands"
     (Budget_probes.nested_array_operands 4)
 
+(* A header is charged its lowered text and then every byte of its
+   lines, to the one limit of the unit (design 3.5 rule 7). *)
+let header_charge () =
+  let source =
+    "type box(T) = struct { T value; };\nstruct s { box(int) b; };\n"
+  in
+  let text, _, declarations = read ~product:Header_text source in
+  let name = Option.get (Header.name_of_path "m.tci") in
+  let trap = Trap.builtin in
+  let lowered =
+    Lowering.header_text text ~target:lp64 ~trap ~header_module:"m"
+      declarations
+  in
+  let header =
+    Lowering.header text ~target:lp64 ~trap ~source:"in.tc" ~name
+      declarations
+  in
+  let charged_after_lowering =
+    match (lowered, header) with
+    | Ok (_, lowered_bytes), Ok (header, header_bytes) ->
+        header_bytes - lowered_bytes = String.length header
+    | (Ok _ | Error _), _ -> false
+  in
+  compares "a header is charged its bytes after its lowered text"
+    (string_of_bool charged_after_lowering)
+    "true"
+
 (* The most that lowering may allocate for a pattern 120 deep under
    [*] over a field name of 100 KB, which bounds the memory that it
    takes: the text is about 12 MB, and lowering it allocates about
@@ -1037,5 +1064,6 @@ let () =
   places ();
   try_defers ();
   output_limit ();
+  header_charge ();
   deep_patterns ();
   if !failures > 0 then exit 1

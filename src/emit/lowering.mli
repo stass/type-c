@@ -54,8 +54,27 @@ val header_text :
     {!edits} for the header of an interface (design 9.3), whose
     [declarations] were read for [target] as
     {!Typec_sema.Declarations.Header_text}: the lowered text that
-    {!Emitter.header_text} writes from them for the header's module
+    {!Emitter.header_text} writes from them, from which {!header} writes
+    the header, for the header's module
     [header_module], with each definition of an instance under its guard
     ({!Emitter.Guarded}), and the bytes charged. {!edits} takes the
     declarations of a unit alone, and this function those of a header;
     [Invalid_argument] for the other. *)
+
+val header :
+  Typec_cpp.Reader.t ->
+  target:Typec_sema.Target.t ->
+  trap:Trap.t ->
+  source:string ->
+  name:Header.name ->
+  Typec_sema.Declarations.t ->
+  (string * int, Typec_cpp.Reader.error) result
+(** [header text ~target ~trap ~source ~name declarations] is the header
+    of the interface [name] at the path [source] (design 9.3), which
+    {!Header.write} writes from the text that {!header_text} lowers for
+    its module, and the bytes charged: the lowered text and then every
+    line of the header, each to the one output limit of [text] (design
+    3.5 rule 7). Or the error of {!header_text}, of {!Header.write}, or
+    at the first line of the header whose charge would pass the limit.
+    [Invalid_argument] for declarations read for a unit, and where the
+    lowered text does not read again, a bug of typec's. *)

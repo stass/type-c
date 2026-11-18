@@ -53,6 +53,11 @@ let catch_refusal f =
 
 (* Checks of the step's output. *)
 
+(* The first line of the interface [source], where a refusal of the
+   whole interface stands. *)
+let interface_start source =
+  { Location.file = source; line = 1; flags = No_flags }
+
 let empty_text_message =
   "the interface holds no token and no directive line in the output of \
    -E: it has no #ifndef guard of its own, which an interface that has a \
@@ -88,9 +93,7 @@ let refuse_guard_line : Reader.guard_line -> unit = function
 let check_interface ~source (read : Reader.interface) unit =
   catch_refusal (fun () ->
       if not read.holds_text then
-        refuse
-          { Location.file = source; line = 1; flags = No_flags }
-          empty_text_message;
+        refuse (interface_start source) empty_text_message;
       let declarations =
         List.map Tree.external_span (Tree.external_declarations unit)
       in
@@ -168,24 +171,25 @@ let include_line_text (line : Reader.include_line) =
 
 (* Runs. *)
 
-(* A run as it is built: its lines, the tokens of its open line, and the
-   identifiers of its tokens in the order in which they first appear. *)
+(* A line of the header, written from the text at [location], where a
+   charge that passes the output limit is refused. *)
+type line = { location : Location.t; text : string }
+
+(* The tokens of the line being built, in reverse, and the location of
+   the last of them. *)
+type open_line = { at : Location.t; tokens : string list }
+
+(* A run as it is built: its lines, its open line, and the identifiers of
+   its tokens in the order in which they first appear. *)
 type run = {
-  mutable lines : string list;  (** in reverse *)
-  mutable line : string list;  (** in reverse *)
-  mutable line_location : Location.t option;
+  mutable lines : line list;  (** in reverse *)
+  mutable open_line : open_line option;
   mutable identifiers : string list;  (** in reverse *)
   seen : (string, unit) Hashtbl.t;
 }
 
 let new_run () =
-  {
-    lines = [];
-    line = [];
-    line_location = None;
-    identifiers = [];
-    seen = Hashtbl.create 64;
-  }
+  { lines = []; open_line = None; identifiers = []; seen = Hashtbl.create 64 }
 
 (* No directive may define or undefine [defined] (C11 6.10.8p2), so it
    never names a macro, and GCC and Clang refuse its #undef. *)
@@ -196,37 +200,41 @@ let collect run name =
   end
 
 let close_line run =
-  if run.line <> [] then
-    run.lines <- String.concat " " (List.rev run.line) :: run.lines;
-  run.line <- [];
-  run.line_location <- None
+  match run.open_line with
+  | None -> ()
+  | Some { at; tokens } ->
+      let text = String.concat " " (List.rev tokens) in
+      run.lines <- { location = at; text } :: run.lines;
+      run.open_line <- None
 
 (* The tokens of one line of the source share a line of the header, so
    that a client's diagnostics name a line that holds what the source's
    line did. The blank between two tokens keeps two '?' apart. *)
 let add_to_line run (location : Location.t) text =
-  let same_line (open_location : Location.t) =
-    open_location.file = location.file && open_location.line = location.line
+  let tokens =
+    match run.open_line with
+    | Some { at; tokens }
+      when at.file = location.file && at.line = location.line ->
+        tokens
+    | Some _ | None ->
+        close_line run;
+        []
   in
-  (match run.line_location with
-  | Some open_location when same_line open_location -> ()
-  | Some _ | None -> close_line run);
-  run.line_location <- Some location;
-  run.line <- text :: run.line
+  run.open_line <- Some { at = location; tokens = text :: tokens }
 
-let add_whole_line run text =
+let add_whole_line run location text =
   close_line run;
-  run.lines <- text :: run.lines
+  run.lines <- { location; text } :: run.lines
 
 (* The guard of an instance's or the trap's definition is a name of a
    run that the macro bracket does not name, so that it stays defined
    after the run (design 9.3); lowering writes no #define, which the
    reader would take for a macro's definition. *)
 let add_guard_line run : Reader.guard_line -> unit = function
-  | If_not_defined { name; _ } ->
-      add_whole_line run ("#ifndef " ^ name);
-      add_whole_line run ("#define " ^ name)
-  | End_if _ -> add_whole_line run "#endif"
+  | If_not_defined { name; location } ->
+      add_whole_line run location ("#ifndef " ^ name);
+      add_whole_line run location ("#define " ^ name)
+  | End_if location -> add_whole_line run location "#endif"
 
 (* Compilers disagree on the spelling of an extended character that a
    pragma restores, so no spelling keeps every client's macro. *)
@@ -255,46 +263,54 @@ let add_token (lowered : Reader.t) run (token : Token.t) =
       refuse_trigraph token.location bytes;
       List.iter (refuse_extended_identifier token) names;
       List.iter (collect run) names;
-      add_whole_line run bytes
+      add_whole_line run token.location bytes
   | Pragma (Not_tokens _) ->
       invalid_arg "Header.add_token: Type-C text holds no such pragma"
   | Typec_pragma -> ()
 
 (* The macro bracket (design 9.3): while the client reads the run, no
    identifier in it names a macro, and after it the client has every
-   macro that it had. *)
-let bracketed run =
+   macro that it had. Each line of the bracket is added as it is
+   spelt, at the location of the run's first line, so bracket lines
+   that would pass the output limit are refused before they are built;
+   the run's own lines re-spell lowered text, which was charged. A run
+   with no line has no identifier, as each comes with its token. *)
+let write_bracketed add run =
   close_line run;
-  let identifiers = List.rev run.identifiers in
-  let push name =
-    [ Printf.sprintf "#pragma push_macro(\"%s\")" name; "#undef " ^ name ]
-  in
-  let pop name = Printf.sprintf "#pragma pop_macro(\"%s\")" name in
-  List.concat_map push identifiers
-  @ List.rev run.lines
-  @ List.map pop identifiers
+  match List.rev run.lines with
+  | [] -> ()
+  | first :: _ as lines ->
+      let identifiers = List.rev run.identifiers in
+      let add_bracket_line text = add first.location text in
+      let push name =
+        add_bracket_line (Printf.sprintf "#pragma push_macro(\"%s\")" name);
+        add_bracket_line ("#undef " ^ name)
+      in
+      let pop name =
+        add_bracket_line (Printf.sprintf "#pragma pop_macro(\"%s\")" name)
+      in
+      List.iter push identifiers;
+      List.iter (fun line -> add line.location line.text) lines;
+      List.iter pop identifiers
 
 (* The lines between the macro probe and the guard's #endif: the include
    lines, each where it stands, and the runs between them, each in its
    macro bracket. *)
-let body (lowered : Reader.interface) =
-  let written = ref [] in
+let write_body add (lowered : Reader.interface) =
   let run = ref (new_run ()) in
-  let add lines = written := List.rev_append lines !written in
   let end_run () =
-    add (bracketed !run);
+    write_bracketed add !run;
     run := new_run ()
   in
   let write : Reader.own_part -> unit = function
     | Include_line line ->
         end_run ();
-        add [ include_line_text line ]
+        add line.location (include_line_text line)
     | Guard_line line -> add_guard_line !run line
     | Own_token token -> add_token lowered.unit !run token
   in
   List.iter write lowered.own_text;
-  end_run ();
-  List.rev !written
+  end_run ()
 
 (* The macro bracket rests on #pragma push_macro and pop_macro, so the
    header fails to compile where they do not restore a macro: the
@@ -316,8 +332,9 @@ let macro_probe module_name =
   ]
 
 (* A Type-C unit reads the interface itself, and the redirect stands
-   outside the guard, so no lowered text reaches it. *)
-let write name lowered =
+   outside the guard, so no lowered text reaches it. The lines that
+   stand for no line of the interface are charged at its first. *)
+let write output ~source name lowered =
   catch_refusal (fun () ->
       let module_name = module_name name in
       let guard = "__tc_module__" ^ module_name in
@@ -331,8 +348,9 @@ let write name lowered =
           "#define " ^ guard;
         ]
       in
-      let lines =
-        skeleton_head @ macro_probe module_name @ body lowered
-        @ [ "#endif"; "#endif" ]
-      in
-      String.concat "\n" lines ^ "\n")
+      let interface_start = interface_start source in
+      Emitter.lines output (fun add ->
+          List.iter (add interface_start)
+            (skeleton_head @ macro_probe module_name);
+          write_body add lowered;
+          List.iter (add interface_start) [ "#endif"; "#endif" ]))

@@ -2529,10 +2529,39 @@ let edits (text : Reader.t) ~trap declarations =
     declarations;
   Emitter.limited text ~trap (fun output -> all_edits output declarations)
 
+let lowered_header output ~target ~header_module declarations =
+  Emitter.header_text output ~target ~header_module
+    (all_edits output declarations)
+
 let header_text (text : Reader.t) ~target ~trap ~header_module declarations
     =
   check_product ~caller:"Lowering.header_text"
     Typec_sema.Declarations.Header_text declarations;
   Emitter.limited text ~trap (fun output ->
-      Emitter.header_text output ~target ~header_module
-        (all_edits output declarations))
+      lowered_header output ~target ~header_module declarations)
+
+(* The header is written from the lowered text read again, so that the
+   writer meets each token it writes as a token. The text is emission's
+   own output, so a failure to read it is a bug of typec's. *)
+let read_lowered ~source text =
+  match Reader.read_interface ~name:source text with
+  | Ok read -> read
+  | Error error ->
+      invalid_arg
+        ("Lowering.header: the lowered text of the interface does not \
+          read: " ^ Reader.error_message error)
+
+(* The header is written for the output that the lowered text was made
+   for, so its lines are charged after the lowered text, to one limit. *)
+let header (text : Reader.t) ~target ~trap ~source ~name declarations =
+  check_product ~caller:"Lowering.header" Typec_sema.Declarations.Header_text
+    declarations;
+  let header_module = Header.module_name name in
+  let write output =
+    lowered_header output ~target ~header_module declarations
+    |> read_lowered ~source
+    |> Header.write output ~source name
+  in
+  match Emitter.limited text ~trap write with
+  | Ok (Ok header, charged) -> Ok (header, charged)
+  | Ok (Error refusal, _) | Error refusal -> Error refusal

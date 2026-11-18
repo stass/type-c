@@ -38,13 +38,23 @@ val check_interface :
     the declarations that [read] parses to. *)
 
 val write :
-  name -> Typec_cpp.Reader.interface -> (string, Typec_cpp.Reader.error) result
-(** [write name lowered] is the header of the interface [name], whose
-    lowered text {!Typec_cpp.Reader.read_interface} has read in [lowered]:
-    the redirect to the interface under [__TYPEC__], the guard, the macro
+  Emitter.output ->
+  source:string ->
+  name ->
+  Typec_cpp.Reader.interface ->
+  (string, Typec_cpp.Reader.error) result
+(** [write output ~source name lowered] is the header of the interface
+    [name] at the path [source], whose lowered text
+    {!Typec_cpp.Reader.read_interface} has read in [lowered]: the
+    redirect to the interface under [__TYPEC__], the guard, the macro
     probe, and the tokens of the interface's own text in runs between its
     include lines, each run in a macro bracket. Or the error at the first
     include line, pragma line or identifier that the header cannot carry:
     an [#include_next], a trigraph sequence in an include or pragma line,
     and an identifier with a character outside the basic character set
-    but [$]. *)
+    but [$]. Every line is charged to the output limit of [output] as it
+    is written ({!Emitter.lines}): a line of a run at the location of its
+    text, an include line at its own, a line of a macro bracket at that
+    of its run's first line, and the others at the first line of
+    [source]; a charge that passes the
+    limit raises past this function to {!Emitter.limited}. *)

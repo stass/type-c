@@ -190,17 +190,6 @@ let read_interface (translation : Pipeline.translation) =
 
 let refuse_on_error = function Ok value -> value | Error error -> refuse error
 
-(* The lowered text is emission's own output, so a failure to read it
-   again is a bug of typec's. *)
-let read_lowered (translation : Pipeline.translation) text =
-  match Typec_cpp.Reader.read_interface ~name:translation.source text with
-  | Ok read -> read
-  | Error error ->
-      stop Exit_status.Internal
-        ("internal error, a bug in typec: the lowered text of the \
-          interface does not read: "
-        ^ Typec_cpp.Reader.error_message error)
-
 let stop_on_error = function
   | Ok () -> ()
   | Error message -> stop Exit_status.Environment message
@@ -228,8 +217,6 @@ let put outputs =
         print_text ~what:output.what output.text)
     outputs
 
-(* The header is written from the lowered text of the interface, read
-   again so that the writer meets each token it writes as a token. *)
 let header_output ~stats ~trap (target : Target.t) (plan : Pipeline.header) =
   let translation = plan.interface in
   let read = read_interface translation in
@@ -238,18 +225,16 @@ let header_output ~stats ~trap (target : Target.t) (plan : Pipeline.header) =
   in
   refuse_on_error
     (Typec_emit.Header.check_interface ~source:translation.source read tree);
-  let header_text, counts =
+  let header, counts =
     refuse_on_error
-      (Front_end.lower_header target ~trap
-         ~header_module:(Typec_emit.Header.module_name plan.name)
-         read.unit scopes)
+      (Front_end.lower_header target ~trap ~source:translation.source
+         ~name:plan.name read.unit scopes)
   in
   if stats then report_counts translation counts;
-  let lowered_read = read_lowered translation header_text in
   {
     what = "the header";
     destination = translation.emitted;
-    text = refuse_on_error (Typec_emit.Header.write plan.name lowered_read);
+    text = header;
     file = Header_file.header ~first_line:Typec_emit.Header.first_line;
   }
 

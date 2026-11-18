@@ -136,6 +136,21 @@ Under -o the header goes where it names, and -o - is stdout.
   $ cmp elsewhere.h room.h
   $ typec -Wno-trigraphs --emit-c-header room.tci -o - | cmp - room.h
 
+With --stats the header's lines, its macro brackets and its macro probe
+among them, are counted in output_bytes after the charge of lowering,
+which holds the unit's own text in full (design 3.5 rule 7), and the
+header is the same.
+
+  $ typec -Wno-trigraphs --stats --emit-c-header room.tci -o counted.h \
+  >   2> stats
+  $ cmp counted.h room.h
+  $ sed 's/^typec: stats: room.tci: //' stats | tr ' ' '\n' > fields
+  $ eval "$(grep '^unit_bytes=\|^output_bytes=\|^output_limit=' fields)"
+  $ header_bytes=$(wc -c < room.h)
+  $ [ "$output_bytes" -ge $((unit_bytes + header_bytes)) ] &&
+  >   [ "$output_bytes" -le "$output_limit" ] ||
+  >   echo "output_bytes=$output_bytes unit_bytes=$unit_bytes header=$header_bytes"
+
 A header that typec did not write stays as it is, and so does anything
 that is not a regular file; one that typec wrote is replaced.
 

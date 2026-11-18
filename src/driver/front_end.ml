@@ -134,15 +134,14 @@ let lower dialect target ~trap text =
   let* _unit, scopes = parse dialect target text in
   lower_parsed target ~trap text scopes
 
-let lower_header target ~trap ~header_module text scopes =
+let lower_header target ~trap ~source ~name text scopes =
   let* declarations =
     Declarations.read target ~product:Header_text text scopes
   in
-  let* header_text, output_bytes =
-    Typec_emit.Lowering.header_text text ~target ~trap ~header_module
-      declarations
+  let* header, output_bytes =
+    Typec_emit.Lowering.header text ~target ~trap ~source ~name declarations
   in
-  Ok (header_text, counts_of text scopes declarations ~output_bytes)
+  Ok (header, counts_of text scopes declarations ~output_bytes)
 
 let counts_line counts =
   Printf.sprintf

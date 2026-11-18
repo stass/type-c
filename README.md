@@ -1729,14 +1729,16 @@ change it. A `.tc` unit that holds a Type-C construct declares NAME
 after its own text, so a declaration of NAME in the program with
 another type is a backend error reported at typec's text (`<typec>`).
 
-`--stats` prints on stderr, for each `.tc` input, one line
-`typec: stats: FILE: ` and the fields `unit_bytes` (the preprocessed
-unit), `instance_bytes` (charged to the instance budget),
-`copy_bytes` (the front end's charge to the output limit for the
-copies of deferred statements, which `output_bytes` counts again),
-`output_bytes` (charged to the output limit by lowering, the unit's own
-text included), `output_limit`, `longest_instance_code` (the most bytes
-of the code of one instance, its generic's name and the encodings of its
+`--stats` prints on stderr, for each `.tc` input and for the `.tci`
+input of `--emit-c-header`, one line `typec: stats: FILE: ` and the
+fields `unit_bytes` (the preprocessed unit), `instance_bytes` (charged
+to the instance budget), `copy_bytes` (the front end's charge to the
+output limit for the copies of deferred statements, which
+`output_bytes` counts again), `output_bytes` (charged to the output
+limit by lowering, the unit's own text included, and for a header then
+every byte of the header, its macro brackets and macro probe among
+them), `output_limit`, `longest_instance_code` (the most bytes of the
+code of one instance, its generic's name and the encodings of its
 arguments, that the bound on encodings holds) and `longest_name` (of a
 type declaration or a generic function, the universe text included),
 each as `name=value`: the counts of design 3.5 rule 7 that the

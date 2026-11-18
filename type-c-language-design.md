@@ -831,9 +831,12 @@ id(stmt) s;                             /* e = s is an error */
      `--emit-c-header` alike, and no list of constructs decides what
      is counted. The charge is at least what is written: the text of an
      edit that lowering moves into an instance is charged with the edit
-     and again where it moves. A text that lowering builds from a list,
-     such as the enumerators of a variant, is held to the limit item by
-     item before it is built. The limit is 33554432 bytes and 256 for
+     and again where it moves, and a header is charged the lowered text
+     that it is written from and then each of its lines as it is
+     written, the macro brackets and the macro probe among them (9.3).
+     A text that lowering builds from a list, such as the enumerators
+     of a variant, is held to the limit item by item before it is
+     built. The limit is 33554432 bytes and 256 for
      each byte of the preprocessed unit outside its macro definition
      lines (13.3).
    - The front end counts what its reading gives the texts of

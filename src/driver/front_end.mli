@@ -102,14 +102,16 @@ val lower_parsed :
 val lower_header :
   Typec_sema.Target.t ->
   trap:Typec_emit.Trap.t ->
-  header_module:string ->
+  source:string ->
+  name:Typec_emit.Header.name ->
   Typec_cpp.Reader.t ->
   Typec_syntax.Parser.scopes ->
   (string * counts, Typec_cpp.Reader.error) result
-(** [lower_header target ~trap ~header_module text scopes] is the lowered
-    text of the interface [text], after {!parse} gave [scopes], from which
-    its header takes its runs ({!Typec_emit.Lowering.header_text}), and
-    the unit's counts; or the first error. It has no effects. *)
+(** [lower_header target ~trap ~source ~name text scopes] is the header
+    of the interface [name] at the path [source], whose text [text]
+    {!parse} gave [scopes] ({!Typec_emit.Lowering.header}), and the
+    unit's counts, whose [output_bytes] holds the header's lines after
+    the lowered text; or the first error. It has no effects. *)
 
 val lower :
   Typec_syntax.Keyword_set.dialect ->

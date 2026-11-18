@@ -344,11 +344,8 @@ the package, in the order of its commits:
   `__FILE__` through another include path) gets two digests, and a
   client that includes both is refused. Design 9.3 states the
   assumption; a normal form of constants would lift part of it.
-- [High] The output limit and `--stats`: charge the lines of the
-  header, the macro brackets and the macro probe among them, to the
-  unit's output limit and count them in `--stats` (3.5 rule 7);
-  `--stats` reports the counts of the unit's lowering alone.
-- [Medium] `Lowering.edits` and `Lowering.header_text` check at run time
+- [Medium] `Lowering.edits`, `Lowering.header_text` and
+  `Lowering.header` check at run time
   that their declarations were read for their product
   (`Declarations.product`); a phantom parameter of `Declarations.t`
   would make the mismatch fail to compile.
