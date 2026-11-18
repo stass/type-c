@@ -108,20 +108,15 @@ members; its assertions compare the layout with the structure that
   >   return sizeof none != sizeof (int) * 2;
   > }
   > EOF
-  $ typec --cc=$clang -Wall -Werror -o clang-variant variant.tc && ./clang-variant
-  In file included from variant.tc:8:
-  ./client.h:28:11: error: enumeration value '__tc_tag_max__expr_tag' not handled in switch [-Werror,-Wswitch]
-     28 |   switch (e->tag) {
-        |           ^~~~~~
-  ./client.h:28:11: note: add missing switch cases
-     28 |   switch (e->tag) {
-        |           ^
-     29 |   case expr_Number: return e->u.Number.value;
-     30 |   case expr_Nil: return 0;
-     31 |   case expr_Add: return eval(e->u.Add.left) + eval(e->u.Add.right);
-     32 |   }
-  1 error generated.
+
+Apple's Clang follows the error with a note that offers the missing
+cases, which LLVM's Clang does not print, so of Clang's diagnostics only
+the error line is checked.
+
+  $ typec --cc=$clang -Wall -Werror -o clang-variant variant.tc 2> clang.err
   [1]
+  $ grep error: clang.err
+  ./client.h:28:11: error: enumeration value '__tc_tag_max__expr_tag' not handled in switch [-Werror,-Wswitch]
   $ typec --cc=$gcc -Wall -Werror -o gcc-variant variant.tc && ./gcc-variant
   In file included from variant.tc:8:
   client.h: In function 'eval':

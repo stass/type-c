@@ -1480,23 +1480,16 @@ the package, in the order of its commits:
 (musl) in containers, each on x86-64 and on arm64 (the latter under
 emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
 
-- [High] `c_header.t` fails on `debian-amd64`: the dependency output of
-  the backend lists `/usr/include/stdc-predef.h` before the other
-  headers, which the expected output lacks.
-- [High] `type_declarations.t` fails on `debian-amd64`: Clang 21 prints
-  an "add missing switch cases" note after the `-Wswitch` error that the
-  expected output lacks.
-- [High] `try_expressions.t` fails on `debian-amd64`: `fenv.tc` links
-  without `-lm` (undefined `feclearexcept` and `fetestexcept`) with
-  Clang and with GCC.
-- [High] `examples.t` fails on `debian-amd64`: `original/strnsubst.c`
-  uses `uintptr_t` without `<stdint.h>`, which glibc's headers do not
-  bring in.
 - [Medium] `tools/hosts/run.sh` runs only the image's GCC, `gcc` 14 on
   Debian, whose image fixes `TYPEC_TEST_GCC`, so the suite never runs
-  with the image's `gcc-16`; run by hand with `docker run --env
-  TYPEC_TEST_GCC=/usr/bin/gcc-16`, it gives the same four failures as
-  GCC 14. Pass the variable through `run.sh` or name a host for it.
+  with the image's `gcc-16`, which only `docker run --env
+  TYPEC_TEST_GCC=/usr/bin/gcc-16` reaches by hand. Pass the variable
+  through `run.sh` or name a host for it.
+- [Low] `test/run/c_header.t` cannot tell `-MD` from `-MMD`, nor `-M`
+  from `-MM`: its interface includes no system header and the rules are
+  made under `-nostdinc`, so a driver that passed the one for the other
+  would pass. A case with one system include that checks only whether
+  each rule lists a system header would cover it.
 - [Low] Two runs of `tools/hosts/freebsd.sh` on one `DIR` at once are
   not guarded: each empties the other's source and corpus.
 - [Low] Two runs of `tools/hosts/run.sh` for one host from trees with

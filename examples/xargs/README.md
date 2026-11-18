@@ -48,13 +48,15 @@ make check
 TYPEC_CC=gcc-14 make clean check
 ```
 
-Three things stand between upstream's C and other systems, and the
+Four things stand between upstream's C and other systems, and the
 [Makefile](Makefile) handles each outside the sources, so that
 `original/` stays as upstream has it:
 
 * glibc has no `strtonum(3)`: [`original/compat.h`](original/compat.h)
   defines it on Linux, with the BSD messages that `xargs` prints, and the
   Makefile puts it before each file with `-include`;
+* glibc's `<unistd.h>` does not declare the `uintptr_t` that
+  `strnsubst.c` uses: `compat.h` includes `<stdint.h>` on Linux;
 * `xargs.c` includes FreeBSD's `<sys/limits.h>`:
   [`original/compat/sys/limits.h`](original/compat/sys/limits.h)
   includes `<limits.h>` instead, on every system but FreeBSD. The port

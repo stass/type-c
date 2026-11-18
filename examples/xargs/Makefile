@@ -21,8 +21,9 @@ xargs: $(PORT_OBJS)
 %.o: %.tc
 	$(COMPILE.c) $(OUTPUT_OPTION) $<
 
-# compat.h supplies strtonum(3), which glibc lacks; pathnames.h is
-# upstream's, beside xargs.c.
+# compat.h supplies what glibc lacks: strtonum(3), and the uintptr_t
+# that strnsubst.c expects from <unistd.h>; pathnames.h is upstream's,
+# beside xargs.c.
 $(PORT_OBJS) $(ORIGINAL_OBJS): CPPFLAGS += -include original/compat.h \
     -I original
 

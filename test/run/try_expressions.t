@@ -56,18 +56,19 @@ condition.
   > }
   > EOF
 
-Apple Clang keeps the order at -O0 and at -O2, and GCC at -O0.
+Apple Clang keeps the order at -O0 and at -O2, and GCC at -O0. Each
+link names -lm, the library where glibc keeps the functions of <fenv.h>.
 
   $ for o in -O0 -O2; do
   >   typec --cc=$clang -std=c11 -pedantic-errors -Wall -Wextra -Werror $o \
-  >     -o fenv fenv.tc && ./fenv
+  >     -o fenv fenv.tc -lm && ./fenv
   > done
   3
   3
   3
   3
   $ typec --cc=$gcc -std=c11 -pedantic-errors -Wall -Wextra -Werror \
-  >   -Wno-unknown-pragmas -O0 -o fenv fenv.tc && ./fenv
+  >   -Wno-unknown-pragmas -O0 -o fenv fenv.tc -lm && ./fenv
   3
   3
 
@@ -90,7 +91,7 @@ temporaries before the if in place of the __tc_v ones.
   [1]
   $ for o in -O0 -O2; do
   >   $clang -std=c11 -Wno-gnu-line-marker $o -x cpp-output -o fenv_read \
-  >     fenv_read.i && ./fenv_read
+  >     fenv_read.i -lm && ./fenv_read
   > done
   1
   1
@@ -116,7 +117,8 @@ joins the runs above.
   >   return 0;
   > }
   > EOF
-  $ $gcc -std=c11 -O2 -Wno-unknown-pragmas -o fenv_c fenv_c.c && ./fenv_c
+  $ $gcc -std=c11 -O2 -Wno-unknown-pragmas -o fenv_c fenv_c.c -lm &&
+  >   ./fenv_c
   1
 
 The lowered text draws one -Wconversion warning for each __tc_v

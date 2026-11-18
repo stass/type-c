@@ -5,15 +5,17 @@
 
 /*
  * strtonum(3) of the BSD C library, which xargs.c and its port xargs.tc
- * use and glibc lacks, so that the unchanged xargs.c and the port build
- * on Linux too.  The Makefile puts it before each file with -include; on
- * FreeBSD and macOS it adds nothing.  Its messages are those of the BSD
- * strtonum, which xargs prints.
+ * use and glibc lacks, and the uintptr_t that strnsubst.c uses and
+ * glibc's <unistd.h> does not declare, so that the unchanged originals
+ * and the port build on Linux too.  The Makefile puts it before each file
+ * with -include; on FreeBSD and macOS it adds nothing.  The messages of
+ * strtonum are those of the BSD one, which xargs prints.
  */
 
 #ifdef __linux__
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 static inline long long
