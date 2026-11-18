@@ -125,4 +125,5 @@ hide the one that the lowered constructor names.
   > EOF
   $ typec --cc=$clang -o clang-enumerator enumerator.tc
   enumerator.tc:5: error: the enumerator `e_A` is declared again, as a type declaration claims it [claimed-name]
+      5 |     int e_A = 1;
   [80]

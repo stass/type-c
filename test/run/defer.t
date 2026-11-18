@@ -404,7 +404,9 @@ A pragma that sets state for the text after it is refused: a copy of
   >   typec --cc=$cc $flags -o pack pack.tc
   > done
   pack.tc:4: error: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them [deferred-pragma]
+      4 | #pragma pack(push, 1)
   pack.tc:4: error: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them [deferred-pragma]
+      4 | #pragma pack(push, 1)
   [80]
 
 A return in the operand of `slice_from_array` runs the copy of the

@@ -183,5 +183,7 @@ typec refuses the operand.
   >   typec --cc=$cc -Wall -Wextra -Werror -o linked linked.tc && ./linked
   > done
   linked.tc:7: error: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text [try-name-capture]
+      7 |     try ({ extern int o __attribute__((aligned(16))); (void)o; r; });
   linked.tc:7: error: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text [try-name-capture]
+      7 |     try ({ extern int o __attribute__((aligned(16))); (void)o; r; });
   [80]

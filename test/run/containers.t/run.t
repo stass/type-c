@@ -126,4 +126,5 @@ map does.
   > EOF
   $ typec --cc=$clang $flags -c contains.tc
   contains.tc:7: error: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type [type-parameter-operation]
+      7 |                 if (v->data[i] == x)
   [80]

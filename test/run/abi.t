@@ -813,6 +813,7 @@ status 80.
   $ printf 'void f(reg_id r) { printf("%%u", r); }\n' >> ellipsis.tc
   $ typec --cc="$clang" -c ellipsis.tc -o ellipsis.o
   ellipsis.tc:3: error: an argument without a parameter type may not be of the distinct type 'reg_id'; cast it to 'unsigned int' [distinct-operation]
+      3 | void f(reg_id r) { printf("%u", r); }
   [80]
 
 A small program in Type-C and its hand-written C equivalent, a tagged

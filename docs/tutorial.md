@@ -325,6 +325,7 @@ reset(struct conf *c)
 ```console
 $ typec -c mixed.tc
 mixed.tc:6: error: a value of type 'seconds' does not convert to 'port' without a cast [distinct-conversion]
+    6 | 	c->bind_port = c->timeout;
 [80]
 ```
 
@@ -823,6 +824,7 @@ same(T a, T b)
 ```console
 $ typec -c same.tc
 same.tc:4: error: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type [type-parameter-operation]
+    4 | 	return (a == b);
 [80]
 ```
 
@@ -1012,8 +1014,9 @@ And `s.data[i]` is the unchecked index, visible where it is written.
 ## 7. Reading the errors and the C
 
 `typec` stops at the first error and prints it as GCC and Clang print
-theirs, `file:line: error: message`, and exits with 80. There is a line
-and no column. An error under a rule of Type-C ends with the rule's name
+theirs, `file:line: error: message` with the line of the source under
+it, and exits with 80. There is a line and no column, so no caret. An
+error under a rule of Type-C ends with the rule's name
 in brackets, the thing to search for: `dune build docs/diagnostics.md`
 writes the catalog of names ([What typec
 reports](../README.md#what-typec-reports)).
@@ -1029,6 +1032,7 @@ $ cp key.tci key.tci.orig
 $ sed -i.bak 's/| Debug/| Debug | Name/' key.tci
 $ typec -c conf.tc
 conf.tc:44: error: the match does not cover the value 'Setting(Name, _)' [match-coverage]
+   44 | 	match (parse_line(text)) {
 [80]
 $ mv key.tci.orig key.tci
 ```
@@ -1041,6 +1045,7 @@ $ cp load.tc load.tc.orig
 $ sed -i.bak 's/try conf_set(text, c);/conf_set(text, c);/' load.tc
 $ typec -c load.tc
 load.tc:27: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
+   27 | 		conf_set(text, c);
 [80]
 $ mv load.tc.orig load.tc
 ```

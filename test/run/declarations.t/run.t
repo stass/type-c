@@ -32,9 +32,11 @@ backends check the initialiser of a pointer.
   $ printf 'const int cf(void);\nint (*p)(void) = cf;\n' > pointer.tc
   $ typec --cc="$clang" -c redeclared.tc -o redeclared.o
   redeclared.tc:2: error: 'cf' is redeclared with an incompatible type (C11 6.7p4)
+      2 | int cf(void);
   [80]
   $ typec --cc="$clang" -c typedef.tc -o typedef.o
   typedef.tc:2: error: 'F' is redefined as a typedef of another type (C11 6.7p3)
+      2 | typedef int F(void);
   [80]
   $ typec --cc="$clang" -c pointer.tc -o pointer.o 2> /dev/null || echo refused
   refused

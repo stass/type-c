@@ -330,12 +330,15 @@ The refusals of the interface.
   >   typec --cc="$cc" -Wno-trigraphs --emit-c-header -DROOM_TCI room.tci
   > done
   room.tci:1: error: the interface holds no token and no directive line in the output of -E: it has no #ifndef guard of its own, which an interface that has a header needs, or something defined that guard before the interface was read, as a file that -include names does when it includes the interface or defines its guard
+      1 | #ifndef ROOM_TCI
   room.tci:1: error: the interface holds no token and no directive line in the output of -E: it has no #ifndef guard of its own, which an interface that has a header needs, or something defined that guard before the interface was read, as a file that -include names does when it includes the interface or defines its guard
+      1 | #ifndef ROOM_TCI
   [80]
   $ printf 'int a;\n' > fields.h
   $ printf 'struct t {\n#include "fields.h"\n};\n' > inside.tci
   $ typec --emit-c-header inside.tci
   inside.tci:2: error: #include "fields.h" inside a declaration of an interface whose header is written: the header would hold the declaration without the text that the line brings
+      2 | #include "fields.h"
   [80]
   $ printf '#include_next <stddef.h>\n' > next.tci
   $ typec --emit-c-header next.tci
@@ -344,18 +347,22 @@ The refusals of the interface.
         |  ^
   1 warning generated.
   next.tci:1: error: #include_next in an interface whose header is written: a C client would search on from the place of the header, not from that of the interface
+      1 | #include_next <stddef.h>
   [80]
   $ printf '#ident "x"\nint a;\n' > ident.tci
   $ typec --cc="$gcc" --emit-c-header ident.tci
   ident.tci:1: error: #ident in an interface whose header is written: the header carries no directive of the interface but its include lines and pragmas
+      1 | #ident "x"
   [80]
   $ printf 'int caf\\u00e9;\n' > accent.tci
   $ typec --emit-c-header accent.tci
   accent.tci:1: error: identifier 'caf\u00E9' with a character outside the basic character set in an interface whose header is written: #pragma push_macro and pop_macro restore no macro of it in every C client
+      1 | int caf\u00e9;
   [80]
   $ printf '#pragma weak x??=\nint a;\n' > tri.tci
   $ typec --cc="$gcc" -Wno-trigraphs --emit-c-header tri.tci
   tri.tci:1: error: trigraph sequence in '#pragma weak x??=', which a C client compiled with trigraphs would replace
+      1 | #pragma weak x??=
   [80]
 
 A #line that names another file, as a generated interface writes, leaves

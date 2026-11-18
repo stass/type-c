@@ -279,14 +279,19 @@ the backend and its headers, so its location is cut.
   $ without_location() { sed 's/^.*:[0-9]*: error: //'; }
   $ typec --cc=$clang -Wp,-P -c x.tc 2>&1 | without_location
   token before the first line marker, as when an option such as -P removes the line markers
+      1 | #include <stdarg.h>
   $ typec --cc=$gcc -Wp,-P -c x.tc 2>&1 | without_location
   token before the first line marker, as when an option such as -P removes the line markers
+      1 | #include <stdarg.h>
   $ typec --cc=$clang -Xpreprocessor -P -c x.tc 2>&1 | without_location
   token before the first line marker, as when an option such as -P removes the line markers
+      1 | #include <stdarg.h>
   $ typec --cc=$gcc -Xpreprocessor -P -c x.tc 2>&1 | without_location
   token before the first line marker, as when an option such as -P removes the line markers
+      1 | #include <stdarg.h>
   $ typec --cc=$clang -Wp,-C -c x.tc 2>&1 | without_location
   comment in preprocessed text, as when an option such as -C keeps the comments
+      1 | /*===---- stdarg.h - Variable argument handling ----------------------------===
 
 An option that starts with -d is a dump, which changes the text as
 -dM and -dU do, so it is refused when -Wp, -Xpreprocessor or -Xclang
@@ -348,9 +353,11 @@ typec and to the backends alike.
   $ typec --cc=$clang -fno-asm -fsyntax-only iso.tc
   $ typec --cc=$clang -c iso.tc
   iso.tc:1: error: expected `(` after `typeof`, found `;`
+      1 | int typeof; int asm;
   [80]
   $ typec --cc=$gcc -std=c11 -fasm -c iso.tc
   iso.tc:1: error: expected `(` after `typeof`, found `;`
+      1 | int typeof; int asm;
   [80]
   $ $clang -x c -std=gnu11 -fsyntax-only iso.tc 2>/dev/null
   [1]
@@ -392,6 +399,7 @@ shows that the backend can write there.
   $ printf 'int @;\n' > bad-read.tc
   $ typec --cc=$clang -c bad-read.tc
   bad-read.tc:1: error: unexpected character '@'
+      1 | int @;
   [80]
   $ printf '#!/bin/sh\nkill -s KILL $$\n' > killed-cc && chmod +x killed-cc
   $ { typec --cc=./killed-cc -c x.tc; } 2>/dev/null
@@ -433,13 +441,16 @@ status 80 and one message, before anything is emitted or compiled.
   $ printf 'int x = ;\n' > bad-parse.tc
   $ typec --cc=$clang -c bad-parse.tc
   bad-parse.tc:1: error: expected an expression, found `;`
+      1 | int x = ;
   [80]
   $ printf 'int n;\nlong n;\n' > bad-type.tc
   $ typec --cc=$gcc -c bad-type.tc
   bad-type.tc:2: error: 'n' is redeclared with an incompatible type (C11 6.7p4)
+      2 | long n;
   [80]
   $ typec --cc=$clang --emit-c bad-type.tc
   bad-type.tc:2: error: 'n' is redeclared with an incompatible type (C11 6.7p4)
+      2 | long n;
   [80]
   $ test ! -e bad-parse.o && test ! -e bad-type.o && ls -A tmp
 
@@ -451,4 +462,5 @@ by default on x86-64 and not on arm64, so the first compile asks for it.
   $ typec --cc=$clang -fsigned-char --emit-c signed-char.tc -o out/signed-char.i
   $ typec --cc=$clang -funsigned-char --emit-c signed-char.tc
   signed-char.tc:1: error: array has a negative length
+      1 | int a[(char)-1 < 0 ? 1 : -1];
   [80]

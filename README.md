@@ -247,6 +247,7 @@ area(shape s)
 ```console
 $ typec -std=c11 -Wall -Wextra -c area.tc
 area.tc:9: error: the match does not cover the constructor 'Triangle' of the variant 'shape' [match-coverage]
+    9 | 	match (s) {
 [80]
 ```
 
@@ -295,6 +296,7 @@ number_value(token t)
 $ typec -c token.tc
 $ typec -c peek.tc
 peek.tc:6: error: '.' is not defined on the variant 'token'; test it with 'if (case Number(value) = t)' [variant-operation]
+    6 | 	return (t.u.Number.value);
 [80]
 ```
 
@@ -327,6 +329,7 @@ cost(op o)
 ```console
 $ typec -c cost.tc
 cost.tc:9: error: the arm of 'Load(_)' can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
+    9 | 	case Load(_):
 [80]
 ```
 
@@ -356,6 +359,7 @@ may_read(user_id u, group_id g)
 ```console
 $ typec -c ids.tc
 ids.tc:9: error: a value of type 'group_id' does not convert to 'user_id' without a cast [distinct-conversion]
+    9 | 	return (is_member(g, u));	/* swapped */
 [80]
 ```
 
@@ -431,6 +435,7 @@ port_from_argument(const char *argument)
 $ typec -Iinclude -c port.tc
 $ typec -Iinclude -c server.tc
 server.tc:7: error: the distinct type 'port' is private to 'include/port.tci', so only the text of its owner creates its values [private-creation]
+    7 | 	return ((port)atoi(argument));	/* skips the check */
 [80]
 ```
 
@@ -498,6 +503,7 @@ where `list(int)` is wanted:
 ```console
 $ typec -c list.tc
 list.tc:18: error: a value of type 'list(double)' does not convert to 'list(int)' (C11 6.5.16.1p1)
+   18 | 	return (sum(prices));
 [80]
 ```
 
@@ -654,6 +660,7 @@ backup(void)
 ```console
 $ typec -c backup.tc
 backup.tc:8: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
+    8 | 	copy_file("notes.txt", "notes.bak");
 [80]
 ```
 
@@ -1040,7 +1047,11 @@ backends, where the host has the tool.
 ## What typec reports
 
 `typec` stops at the first error it finds, prints it as GCC and Clang
-print theirs, `file:line: error: message`, and exits with status 80. An
+print theirs, `file:line: error: message` with the line of the source
+under it, and exits with status 80. The line has no caret: the C
+compiler preprocesses the source, so the error names a line and no
+column ([design
+13.6](type-c-language-design.md#136-diagnostics-and-debugging)). An
 error under a rule of Type-C ends with the rule's name in brackets, as
 [match-arm-end], the way GCC ends a warning with its option; the
 catalogue of diagnostics (`dune build docs/diagnostics.md` writes it to

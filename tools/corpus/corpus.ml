@@ -29,6 +29,7 @@ module Exit_status = Typec_driver.Exit_status
 module Pipeline = Typec_driver.Pipeline
 module Target_query = Typec_driver.Target_query
 module Command_line = Typec_driver.Command_line
+module Source_line = Typec_driver.Source_line
 
 type options = {
   corpus : string;  (** the corpus repository *)
@@ -239,12 +240,20 @@ let type_c_copy unit = Filename.chop_suffix unit ".c" ^ ".tc"
 let derived unit suffix = type_c_copy unit ^ suffix
 
 (* typec reports a failure of its own last, after anything the backend
-   printed; the record leaves out the name that a message with no place
-   in the source starts with. *)
+   printed, and a refusal with its source line under it; the record
+   keeps the message alone, without the name that a message with no
+   place in the source starts with. *)
 let typec_message stderr_text =
   let name = "typec: " in
-  let lines = String.split_on_char '\n' (String.trim stderr_text) in
-  let last = List.hd (List.rev lines) in
+  let lines =
+    List.filter (fun line -> line <> "") (String.split_on_char '\n' stderr_text)
+  in
+  let last =
+    match List.rev lines with
+    | shown :: message :: _ when Source_line.is_shown shown -> message
+    | last :: _ -> last
+    | [] -> ""
+  in
   if not (String.starts_with ~prefix:name last) then last
   else
     let skip = String.length name in

@@ -74,9 +74,11 @@ nor through a cast. typec refuses it with status 80.
   > EOF
   $ typec --cc=$clang -Iinclude -c src/forger.tc -o forger.o
   src/forger.tc:2: error: the variant 'instruction' is private to 'include/ir.tci', so only the text of its owner creates its values [private-creation]
+      2 | instruction forged(void) { return MOVE(1, 2); }
   [80]
   $ printf '#include "ir.tci"\nsymbol s(void) { return (symbol)1; }\n' \
   >   > src/caster.tc
   $ typec --cc=$gcc -Iinclude -c src/caster.tc -o caster.o
   src/caster.tc:2: error: the distinct type 'symbol' is private to 'include/ir.tci', so only the text of its owner creates its values [private-creation]
+      2 | symbol s(void) { return (symbol)1; }
   [80]

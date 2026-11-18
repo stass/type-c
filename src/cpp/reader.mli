@@ -190,8 +190,13 @@ val length : t -> int
     {!rewrite} copies when it replaces nothing: the universe text and the
     definition lines are not among them. *)
 
+val escape : string -> string
+(** [escape text] is [text] with every character that is not printable
+    ASCII escaped as C writes it: a character of UTF-8 as a universal
+    character name, and any other byte as [\xNN]. Text read from a file
+    goes through it before it reaches a terminal, so that it cannot send
+    control sequences there. *)
+
 val error_message : error -> string
-(** ["file:line: error: message"], the form of a C compiler's errors, with
-    every character that is not printable ASCII escaped as C writes it:
-    a character of UTF-8 as a universal character name, and any other
-    byte as [\xNN]. *)
+(** ["file:line: error: message"], the form of a C compiler's errors,
+    passed through {!escape}. *)

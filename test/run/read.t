@@ -75,7 +75,11 @@ system header and so drop the warning about 'unused'.
   >   typec --cc=$cc -c digraph.tc -o digraph.o
   > done
   hash.tc:3: error: stray '#' outside a directive, as when a macro expands to it
+      3 | H 7 "other.h" 1 3
   digraph.tc:3: error: stray '%:' outside a directive, as when a macro expands to it
+      3 | D pragma GCC system_header
   hash.tc:3: error: stray '#' outside a directive, as when a macro expands to it
+      3 | H 7 "other.h" 1 3
   digraph.tc:3: error: stray '%:' outside a directive, as when a macro expands to it
+      3 | D pragma GCC system_header
   [80]

@@ -8868,6 +8868,40 @@ file scope or as a macro, and no other invented name begins with
   `file:line: error: text`, and carries the source line and a stable
   name. Stable names let tests, editors and users refer to a diagnostic
   without matching its text.
+- The source line follows the message on a line of its own, as the
+  source file holds it, in the margin of the backends' snippets,
+  `    2 | text`, and without a caret: the backend preprocesses (13.2),
+  so a location is a file and a line, and the line in front of the
+  reader is what shows the place in it. The driver reads the file, once
+  for the one refusal of a unit, under the name in the location:
+  - The tokens of a macro's expansion carry the line of its use, the
+    line shown, as GCC and Clang show it first. After `#line` the line
+    shown is the one at the presumed place, as with the backends.
+  - Nothing more is printed where no regular file holds the line: a
+    name that opens no file, as `<stdin>` or `<typec>`, or a file
+    deleted since; a device or a FIFO, which is never opened, as
+    opening one can act on it or wait; a line past the end of the file
+    or past its first 16 MiB, which is all the driver reads, so that a
+    file that reads without end, as `/proc/self/pagemap`, cannot
+    exhaust its memory. A name that holds a backslash is not read: a
+    line marker writes one only in an escape sequence, which the
+    reader does not decode, so the file under the spelled name is
+    another file.
+  - A `#line` directive can name any file that the user can read, and
+    the refusal then shows a line of it, at most 200 bytes: a source
+    can disclose as much with `#include` and an error of the backend,
+    and GCC's own snippet reads the file that `#line` names too.
+  - The file is untrusted text printed to a terminal: a character that
+    is not printable ASCII is escaped as in the message, but a tab,
+    which the margin keeps on its stop: it is eight columns wide below
+    line 100000. A carriage return that ends the line is dropped. A
+    line longer than 200 bytes is cut at the start of the character
+    that holds byte 200 and ends with `...`: a line written by hand
+    fits, and a generated one does not flood the terminal.
+  - No option turns the line off: GCC spells it
+    `-fno-diagnostics-show-caret` and Clang `-fno-caret-diagnostics`,
+    each refuses the other's spelling, and one spelling of `typec`'s
+    own would be an option that neither backend knows.
 - A stable name is lowercase words of letters and digits joined by
   hyphens, as GCC and Clang name the options of their warnings. It names
   a rule of this design that the text breaks, a limit of the GNU profile

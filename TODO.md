@@ -115,14 +115,6 @@ The items are ordered by how often real code meets them.
   'slice(slice(const char))'. Proposed: print the type as the source
   spelled it, 'size_t' and 'slice(str)'. Source: review cases 01, 04
   and 22; probe.
-- [Low] `typec`'s own diagnostics give the file and the line, no
-  column, where the backend's give one: `p05.tc:2: error: ...` beside
-  Clang's `p19.tc:2:48: warning: ...`. The first part of the review
-  ("Columns") measured what recovering them costs and recommends
-  printing the source line instead; P15 is decided on that ground (the
-  backend preprocesses), so print the source line (the item on design
-  13.6 under "Reader of preprocessed text"). Source: Pilot A
-  (`private-creation`); probe.
 - [Low] The parser quotes names with backticks, the typing stages with
   single quotes as GCC and Clang do, and some typing messages use
   backticks too (`[early-break]`, `[deferred-exit]`); pick one, in
@@ -432,8 +424,6 @@ the package, in the order of its commits:
   emits only what the table derives.
 - [Low] Few tests assert the name of the rule `Profile` at its sites;
   assert `[unsupported]` at each.
-- [Low] A diagnostic gives the file and the line but not the source line
-  that design 13.6 says it carries; print the line of text under it.
 - [Low] A carriage return that no newline follows is a blank to the
   reader, but Clang 21 and GCC 16 end a line of `-x cpp-output` input
   there: the backend counts one more line, and a pragma line that holds

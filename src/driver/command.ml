@@ -49,12 +49,6 @@ let stop failure message =
   report message;
   raise (Stopped (Exit (Exit_status.code failure)))
 
-(* A refusal names its place in the source, which says where it comes
-   from, so it is printed without the program's name. *)
-let refuse error =
-  print_error (Typec_cpp.Reader.error_message error);
-  raise (Stopped (Exit (Exit_status.code Exit_status.Refused)))
-
 let stop_if_caught () =
   match Signals.caught () with
   | Some signal -> raise (Stopped (Signal signal))
@@ -87,6 +81,52 @@ let with_file path flags f =
   Fun.protect ~finally:(fun () -> Unix.close file) (fun () -> f file)
 
 let new_file_flags = Unix.[ O_WRONLY; O_CREAT; O_TRUNC ]
+
+(* The first [limit] bytes of [file], or all of it if shorter. *)
+let read_at_most file limit =
+  let buffer = Bytes.create limit in
+  let rec fill filled =
+    if filled = limit then Bytes.sub_string buffer 0 filled
+    else
+      match Unix.read file buffer filled (limit - filled) with
+      | 0 -> Bytes.sub_string buffer 0 filled
+      | count -> fill (filled + count)
+  in
+  fill 0
+
+(* The start of the regular file [path], or None. A device or a FIFO,
+   which a line marker can name, is never opened, as opening one can
+   act on it; the stat before the open decides that, and the fstat
+   after it checks that the file opened is the file stated. O_NONBLOCK
+   and O_NOCTTY keep an open that loses that race from waiting for a
+   FIFO's writer or taking a terminal. The line is shown at best
+   effort, so a failed close gives None too. *)
+let read_source path =
+  try
+    let stated = Unix.stat path in
+    if stated.st_kind <> Unix.S_REG then None
+    else
+      with_file path Unix.[ O_RDONLY; O_NONBLOCK; O_NOCTTY ] (fun file ->
+          let opened = Unix.fstat file in
+          if opened.st_dev <> stated.st_dev || opened.st_ino <> stated.st_ino
+          then None
+          else Some (read_at_most file Source_line.longest_read))
+  with Unix.Unix_error _ | Fun.Finally_raised _ -> None
+
+(* The line that a refusal names, as the diagnostic shows it, or None
+   where no regular file holds it. *)
+let source_line (location : Typec_cpp.Location.t) =
+  match Source_line.path location with
+  | None -> None
+  | Some path ->
+      Option.bind (read_source path) (Source_line.quote ~line:location.line)
+
+(* A refusal names its place in the source, which says where it comes
+   from, so it is printed without the program's name. *)
+let refuse (error : Typec_cpp.Reader.error) =
+  print_error (Typec_cpp.Reader.error_message error);
+  Option.iter print_error (source_line error.location);
+  raise (Stopped (Exit (Exit_status.code Exit_status.Refused)))
 
 let preprocess ~null compiler (translation : Pipeline.translation) =
   with_file translation.preprocessed new_file_flags (fun stdout ->

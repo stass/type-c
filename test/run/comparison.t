@@ -127,11 +127,13 @@ case" cannot be written ahead of a later constructor.
   > done
   $ typec --cc=$clang -DADDED -c expr.tc -o tc.o
   expr.tc:10: error: the match does not cover the constructor 'Add' of the variant 'expr' [match-coverage]
+     10 |   match (*e) {
   [80]
   $ typec --cc=$clang -Wall -Wextra -Werror -DADDED -DWITH_DEFAULT \
   >   -c expr.tc -o tc.o
   $ typec --cc=$clang -DVACUOUS_DEFAULT -c expr.tc -o tc.o
   expr.tc:21: error: the `default` of a match covers no constructor [match-default]
+     21 |   default:
   [80]
 
 2. A payload read outside a match (design 3.2 rule 6): under the wrong
@@ -192,9 +194,11 @@ operation on a variant (variant-operation).
   > done
   $ typec --cc=$clang -DWRONG_TAG -c token.tc -o tc.o
   token.tc:4: error: the enumerator `token_Name` is not available to Type-C text, as a type declaration claims it [claimed-name]
+      4 |   if (t.tag == token_Name)
   [80]
   $ typec --cc=$clang -DNO_TAG_TEST -c token.tc -o tc.o
   token.tc:7: error: '.' is not defined on the variant 'token'; test it with 'if (case Number(value) = t)' [variant-operation]
+      7 |   return t.u.Number.value;
   [80]
 
 3. A missing break at the end of an arm (design 4.3). GCC's -Wextra
@@ -246,6 +250,7 @@ gives -Wimplicit-fallthrough; Clang gives it only when asked.
   > done
   $ typec --cc=$clang -DMISSING_BREAK -c cost.tc -o tc.o
   cost.tc:5: error: the arm of 'Load(_)' can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
+      5 |   case Load(_):
   [80]
 
 4. A value of one distinct type used as another or as its
@@ -294,12 +299,15 @@ conversions (distinct-conversion) and the operator (distinct-operation).
   > done
   $ typec --cc=$clang -DSWAPPED -c ids.tc -o tc.o
   ids.tc:6: error: a value of type 'group_id' does not convert to 'user_id' without a cast [distinct-conversion]
+      6 |   return member(g, u);
   [80]
   $ typec --cc=$clang -DRAW -c ids.tc -o tc.o
   ids.tc:8: error: a value of type 'user_id' does not convert to 'unsigned int' without a cast [distinct-conversion]
+      8 |   unsigned slot = u;
   [80]
   $ typec --cc=$clang -DPRODUCT -c ids.tc -o tc.o
   ids.tc:11: error: '*' is not defined on the distinct type 'user_id'; cast to 'unsigned int' [distinct-operation]
+     11 |   return member(u * 2, g);
   [80]
 
 5. A private value made outside its owner (design 9.2). A C module that
@@ -358,6 +366,7 @@ owner builds the values, which private.t shows.
   > done
   $ typec --cc=$clang -Iinclude -DFORGED -c forge.tc -o tc.o
   forge.tc:4: error: the variant 'insn' is private to 'include/insn.tci', so only the text of its owner creates its values [private-creation]
+      4 |   return Move(1, 2);
   [80]
 
 6. An invalid tag, made by a cast or through a union (design 4.5). C

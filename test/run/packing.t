@@ -126,7 +126,9 @@ refuses the line.
   >     $cc -o program program.o hand.o && ./program
   > done
   ./wire.h:2: error: `M_PACK` in a `#pragma pack` line names the macro defined at ./wire.h:1: Clang replaces a macro in many pragmas when it compiles C and keeps it as written in the preprocessed text that typec compiles; rename the identifier or #undef the macro before the line [pragma-macro]
+      2 | #pragma pack(push, M_PACK)
   wire.h:2: error: `M_PACK` in a `#pragma pack` line names the macro defined at wire.h:1: Clang replaces a macro in many pragmas when it compiles C and keeps it as written in the preprocessed text that typec compiles; rename the identifier or #undef the macro before the line [pragma-macro]
+      2 | #pragma pack(push, M_PACK)
   [80]
 
 The refusal rests on what the backends do with that header: Clang packs

@@ -383,6 +383,7 @@ wrong(seconds s)
 $ typec -Wall -Wextra -Werror -c ports.tc
 $ typec -c mixed.tc
 mixed.tc:9: error: a value of type 'seconds' does not convert to 'port' without a cast [distinct-conversion]
+    9 | 	return (s);
 [80]
 ```
 
@@ -688,6 +689,7 @@ $ ./eval
 2
 $ typec -c arms.tc
 arms.tc:6: error: the match does not cover the constructor 'End' of the variant 'token' [match-coverage]
+    6 | 	match (t) {
 [80]
 ```
 
@@ -890,6 +892,7 @@ $ ./digits
 not a digit: x
 $ typec -c dropped.tc
 dropped.tc:8: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
+    8 | 	parse(s);
 [80]
 ```
 
@@ -1003,6 +1006,7 @@ end of 1
 cannot open
 $ typec -c leave.tc
 leave.tc:5: error: `return` in the statement of a defer, which control leaves only at its end [deferred-exit]
+    5 | 		return (*p);
 [80]
 ```
 
@@ -1140,6 +1144,7 @@ less(T a, T b)
 $ typec -Wall -Wextra -Werror -c swap.tc
 $ typec -c less.tc
 less.tc:5: error: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type [type-parameter-operation]
+    5 | 	return (a < b);
 [80]
 ```
 
@@ -1399,6 +1404,7 @@ forged(void)
 ```console
 $ typec -Iinclude -c forged.tc
 forged.tc:6: error: the variant 'answer' is private to 'include/ticket.tci', so only the text of its owner creates its values [private-creation]
+    6 | 	return (Refused);
 [80]
 ```
 
@@ -1774,7 +1780,8 @@ through the backend.
       dialect of [1.2](#12-c11-and-the-dialect);
    2. `typec` reads the preprocessed text, checks it by the rules of
       this page and lowers it to C11. It stops at the first error, which
-      it prints as `file:line: error: message`, without a column;
+      it prints as `file:line: error: message` with the source line
+      under it, without a column;
    3. the backend compiles that C as preprocessed C, under the options
       of the command line, as it would compile the unit's `.c` file:
       `-c`, `-S`, `-o` and linking make the outputs that they make for a
