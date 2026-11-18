@@ -1331,7 +1331,18 @@ the package, in the order of its commits:
   though its element type and length are known. The target model has no
   alignments and no size of `_Bool` or of an atomic type, so `_Alignof`
   of any type and those sizes are opaque too, although they are not
-  aggregates. How often real code needs each is for the corpus to show.
+  aggregates. The counts over the corpus's 3349 units and the three
+  pilots (`/Volumes/Optaine/type-c-corpus`, 7edc282c975e,
+  `measure/p16`), constructs whose constant expression needs a layout
+  value: enumerator 0, bit-field width 0, `_Static_assert` 0, array
+  designator 0, `#if` 0 (impossible), `case` label 1 (`offsetof`, musl);
+  array lengths 127 in 21 files of 5 programs (95 from one musl macro
+  line, 6 typedefs that assert by a negative length) and 1 in Pilot C's
+  FreeRTOS; static initialisers 9, which the backend evaluates. The two
+  refused constructs occur nowhere, and every array length and `case`
+  passes to the backend, which reports the conflicts typec misses. The
+  corpus holds little kernel or protocol code, where enumerators and
+  static assertions of sizes are most common.
 - [Low] `external_facts.anchor` is an option only for the state before
   the first external declaration, and `note_text` takes it with
   `Option.get`. Build the facts at the first external declaration, or
