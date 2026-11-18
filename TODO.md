@@ -48,23 +48,6 @@ jump into or out of a deferred statement. No message cites a design
 section.
 The items are ordered by how often real code meets them.
 
-- [Medium] A constructor where no variant of it is the target type. A
-  universe constructor gets a note in the design's terms: `return
-  (Err(NoMemory));` in a function returning `err`, `return (None);` in
-  a result function and `(void)Some(3)` give "'Err' is not declared
-  (C11 6.5.1p2); a constructor such as that of 'result(T, E)' is named
-  alone only where the target type is a variant with a constructor of
-  that name, and elsewhere is written qualified". A constructor of the
-  unit's own variant (`int x = NoMemory;`) and any constructor in C
-  text (a `.h`) get no note (`Expressions.undeclared`). Proposed:
-  "'Err' is a constructor of 'result(T, E)', and 'err' is expected
-  here", and in C text "...; in C text a constructor is written
-  qualified, 'result(int, e2).Err(Bad)'". Looking the name up among the
-  constructors of the visible variants would cover both and could
-  replace `Universe.constructors`, which reads the universe text a
-  second time beside the parser, as `Ctype.result_ok` and `result_err`
-  spell two of its names a third time (`test_naming` pins the three
-  together). Source: review cases 31 and 32 (Pilot B); probe.
 - [Medium] `try-name-capture` on `T *p = try f(sizeof(*p));` says
   "'p' is not visible where lowering writes the text", naming lowering
   and no remedy. Pilot B met it 4 times and wrote `sizeof(T)` each
@@ -104,6 +87,20 @@ The items are ordered by how often real code meets them.
   coverage alone, next to `Shown.cut` as a bound on message text. The
   shared-arm refusal may leave out the label that binds when it is past
   the eighth; name that one first.
+- [Low] A constructor of the unit's own variant where no variant with
+  it is expected (`int x = NoMemory;`, or any in C text) reads "'NoMemory'
+  is not declared (C11 6.5.1p2)", where a universe constructor is told
+  its variant and what is expected (`Expressions.stray_constructor`).
+  That refusal can only give the universe variant as an example: a unit
+  variant with a constructor `Ok` gets 'result(T, E).Ok' as its fix; a
+  pattern binding named `Ok`, used past its scope, gets it in place of
+  the binding's message; and `(Some)(1)` is told no variant is
+  expected. Looking the name up among the constructors of the visible
+  variants would cover all of these and could replace `Universe.constructors`, which
+  reads the universe text a second time beside the parser, as
+  `Ctype.result_ok` and `result_err` spell two of its names a third time
+  (`test_naming` pins the three together). Source: review cases 31 and
+  32 (Pilot B); probe.
 - [Low] The test that a refusal of a variant suggests is always 'if
   (case P = e)': for `while (next())` the drop-in form is `while (case
   Ok(value) = next())`, and a `for` or `do` condition can hold no test,

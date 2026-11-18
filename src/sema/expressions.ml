@@ -1837,31 +1837,14 @@ let bound_elsewhere context span name binder =
           (quote (excerpt context pattern_span))
           location.file location.line scope))
 
-(* 6.5.1p2. A name of a constructor of a universe variant, written alone
-   where the target type is no variant with a constructor of that name,
-   names nothing (design 3.3); the note says so, as the user likely meant
-   the constructor. *)
-let not_declared context span name =
-  let constructor_note =
-    match Universe.find_constructor name with
-    | Some constructor when is_type_c_text context span ->
-        Printf.sprintf
-          "; a constructor such as that of %s is named alone only where \
-           the target type is a variant with a constructor of that name, \
-           and elsewhere is written qualified"
-          (quote constructor.variant_head)
-    | Some _ | None -> ""
-  in
-  context.fail span
-    (Rule.c_text
-       (quote name ^ " is not declared (C11 6.5.1p2)" ^ constructor_note))
-
 (* 6.5.1p2: a name that the parser finds no declaration of. *)
 let undeclared context span name =
   let binders = context.typed.enclosing.binders in
   match Option.bind binders (fun binders -> Hashtbl.find_opt binders name) with
   | Some binder -> bound_elsewhere context span name binder
-  | None -> not_declared context span name
+  | None ->
+      context.fail span
+        (Rule.c_text (quote name ^ " is not declared (C11 6.5.1p2)"))
 
 (* An undeclared identifier may name a builtin function of the backend
    (design 13.3). One with a prototype has its function type; one that a
@@ -3910,6 +3893,62 @@ let constructor_expression context position (whole : Tree.expression) =
       Some (qualified_constructor context variant constructor, Some arguments)
   | _ -> None
 
+(* The constructor of a universe variant that [expression] names alone
+   or calls, where the parser finds the name declared as nothing else. *)
+let stray_constructor (expression : Tree.expression) =
+  match expression.node with
+  | Identifier { name; resolution = Undeclared }
+  | Call
+      { callee = { node = Identifier { name; resolution = Undeclared }; _ };
+        _ } ->
+      Universe.find_constructor name
+  | _ -> None
+
+(* 6.5.1p2 and design 3.3: such a constructor names nothing where no
+   variant with it is expected, and C text names no constructor at all
+   (design 2.1). A variant of the unit may have a constructor of the
+   same name, so the refusal gives the universe variant as an example
+   only, and says what is expected there or where constructors are
+   written. *)
+let stray_constructor_message context span position
+    (constructor : Universe.constructor) =
+  let name = quote constructor.constructor_name
+  and variant = quote constructor.variant_head in
+  let named_only =
+    Printf.sprintf
+      "%s names a constructor only where a variant with it is expected, \
+       such as %s"
+      name variant
+  in
+  match (is_type_c_text context span, position) with
+  | false, _ ->
+      Rule.c_text
+        (Printf.sprintf
+           "%s is not declared (C11 6.5.1p2); a constructor such as that of \
+            %s is written only in a Type-C file, a .tc or .tci"
+           name variant)
+  | true, (Targeted t | Listed t) ->
+      constructor_message
+        (Printf.sprintf "%s; here a value of type %s is expected" named_only
+           (quote (Type_name.of_ctype t)))
+  | true, (Untargeted | Discarded | Discarded_branch) ->
+      constructor_message
+        (Printf.sprintf
+           "%s; here none is, so write the variant before it, as %s with \
+            its type arguments"
+           named_only
+           (quote
+              (constructor.variant_head ^ "." ^ constructor.constructor_name)))
+
+(* Refuses before [expression_node] would type the name as undeclared. *)
+let refuse_stray_constructor context position (expression : Tree.expression) =
+  match stray_constructor expression with
+  | Some constructor ->
+      context.fail expression.span
+        (stray_constructor_message context expression.span position
+           constructor)
+  | None -> ()
+
 (* Try (design 5.1) *)
 
 (* Rule 3: a try where the statement being typed is no holder, or that
@@ -4320,7 +4359,9 @@ and positioned context position (expression : Tree.expression) =
   let typed =
     match constructor_expression context position expression with
     | Some (named, arguments) -> construct context expression named arguments
-    | None -> expression_node context position expression
+    | None ->
+        refuse_stray_constructor context position expression;
+        expression_node context position expression
   in
   note_typed context expression typed;
   (* The conversion reads the dependence of the value. *)

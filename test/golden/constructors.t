@@ -168,19 +168,35 @@ Constructors are refused where they do not fit.
 
 A constructor of `option` or `result` alone where no instance of it is
 expected names nothing either; the message says which variant it
-belongs to. C text names no constructor, so its message does not.
+belongs to and what is expected there. C text names no constructor, so
+its message says where constructors are written.
 
   $ printf 'void f(void) { (void)Err(1); }\n' > untargeted_err.tc
   $ ./golden.exe untargeted_err.tc
-  untargeted_err.tc:1: error: 'Err' is not declared (C11 6.5.1p2); a constructor such as that of 'result(T, E)' is named alone only where the target type is a variant with a constructor of that name, and elsewhere is written qualified
+  untargeted_err.tc:1: error: 'Err' names a constructor only where a variant with it is expected, such as 'result(T, E)'; here none is, so write the variant before it, as 'result(T, E).Err' with its type arguments [constructor-expression]
   [1]
   $ printf 'int n = None;\n' > untargeted_none.tc
   $ ./golden.exe untargeted_none.tc
-  untargeted_none.tc:1: error: 'None' is not declared (C11 6.5.1p2); a constructor such as that of 'option(T)' is named alone only where the target type is a variant with a constructor of that name, and elsewhere is written qualified
+  untargeted_none.tc:1: error: 'None' names a constructor only where a variant with it is expected, such as 'option(T)'; here a value of type 'int' is expected [constructor-expression]
+  [1]
+  $ cat > other_variant.tc <<'EOF'
+  > type err = | NoMemory | BadInput(int code);
+  > err g(void) { return (Err(NoMemory)); }
+  > EOF
+  $ ./golden.exe other_variant.tc
+  other_variant.tc:2: error: 'Err' names a constructor only where a variant with it is expected, such as 'result(T, E)'; here a value of type 'err' is expected [constructor-expression]
   [1]
   $ printf '# 1 "c.h" 1\nint n = None;\n' > c_text_none.tc
   $ ./golden.exe c_text_none.tc
-  c.h:1: error: 'None' is not declared (C11 6.5.1p2)
+  c.h:1: error: 'None' is not declared (C11 6.5.1p2); a constructor such as that of 'option(T)' is written only in a Type-C file, a .tc or .tci
+  [1]
+  $ cat > c_text_err.tc <<'EOF'
+  > type e2 = | Bad;
+  > # 1 "c.h" 1
+  > static result(int, e2) h(void) { return (Err(Bad)); }
+  > EOF
+  $ ./golden.exe c_text_err.tc
+  c.h:1: error: 'Err' is not declared (C11 6.5.1p2); a constructor such as that of 'result(T, E)' is written only in a Type-C file, a .tc or .tci
   [1]
   $ cat > targeted_none.tc <<'EOF'
   > option(int) o = None;
