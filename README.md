@@ -1856,7 +1856,7 @@ error; 82 for an internal error.
 ## Printing the version
 
 `typec --version` runs `BACKEND --version`, passes on its output, then
-prints `typec` and its release on a last line, such as `typec 0.3`. A
+prints `typec` and its release on a last line, such as `typec 1.0`. A
 build tool that tells compilers apart by the output of `$CC --version`,
 such as Meson, or a script that reads its first line thus sees the
 backend. The rest of the command line does not reach the backend and

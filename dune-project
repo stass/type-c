@@ -9,4 +9,4 @@
 
 ; The release, which --version prints; its tag is vX.Y, set after this.
 
-(version 0.3)
+(version 1.0)
