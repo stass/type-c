@@ -31,10 +31,23 @@ succeeds although its own line finds the pipe closed.
   $ set +o pipefail
   $ head -1 expected | diff - first
 
+A backend that goes on writing after the reader has gone dies of
+SIGPIPE, which tells only that the reader stopped: typec still
+succeeds.
+
+  $ printf '#!/bin/sh\nwhile echo cc version; do :; done\n' > chatty
+  $ chmod +x chatty
+  $ set -o pipefail
+  $ typec --cc=./chatty --version | head -1
+  cc version
+  $ set +o pipefail
+
 A backend that cannot be started or fails is named, typec's line still
 follows, and the status is the backend's, or 81 when it cannot be
-started; a backend ended by a signal ends typec by it, here by SIGPIPE,
-which the shell does not announce.
+started; a backend ended by another signal than SIGPIPE ends typec by
+it. The subshell keeps the shell's announcement of the signal out of
+the output; dash and BusyBox write it to the stderr of the command, so
+typec's is dropped with it.
 
   $ typec --cc=./no-such-cc --version > printed
   typec: cannot run the C compiler "./no-such-cc": No such file or directory
@@ -47,9 +60,9 @@ which the shell does not announce.
   [3]
   $ test "$(cat printed)" = "typec $release"
 
-  $ printf '#!/bin/sh\nkill -PIPE $$\n' > killed && chmod +x killed
-  $ typec --cc=./killed --version > printed
-  [141]
+  $ printf '#!/bin/sh\nkill -TERM $$\n' > killed && chmod +x killed
+  $ (typec --cc=./killed --version > printed; echo "status $?") 2> /dev/null
+  status 143
   $ test "$(cat printed)" = "typec $release"
 
 An error in one of typec's own options is still one.

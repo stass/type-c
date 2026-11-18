@@ -388,24 +388,31 @@ let print_backend_version program =
 (* A reader that stops at the backend's first line, as head -1 does, may
    have closed the pipe before this line: that is no failure, so SIGPIPE,
    ignored only now that the backend no longer inherits it, must not end
-   typec. Any other failed write fails the command. *)
+   typec. Any other failed write fails the command. Returns whether the
+   reader was gone. *)
 let print_release () =
   let line = "typec " ^ Version.release ^ "\n" in
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-  try ignore (Unix.write_substring Unix.stdout line 0 (String.length line))
+  try
+    ignore (Unix.write_substring Unix.stdout line 0 (String.length line));
+    false
   with
-  | Unix.Unix_error (Unix.EPIPE, _, _) -> ()
+  | Unix.Unix_error (Unix.EPIPE, _, _) -> true
   | Unix.Unix_error (error, _, _) ->
       fail Exit_status.Environment
         ("cannot write the version: " ^ Unix.error_message error)
 
 (* The backend answers first, so a build tool that tells compilers apart
    by the output of --version sees the backend; typec's line follows it
-   whatever the backend did. *)
+   whatever the backend did. A backend that died of SIGPIPE while the
+   reader of typec's output is gone, as after head -1, only wrote after
+   that reader stopped: no failure. *)
 let print_version { Invocation.program; _ } =
   let outcome = print_backend_version program in
-  print_release ();
-  finish outcome
+  let reader_gone = print_release () in
+  match outcome with
+  | Signal signal when signal = Sys.sigpipe && reader_gone -> finish (Exit 0)
+  | _ -> finish outcome
 
 let perform (invocation : Invocation.t) =
   match invocation.action with

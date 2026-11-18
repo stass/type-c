@@ -5713,8 +5713,11 @@ language is defined here and not by the tool.
   counts that P28 reads.
 - `--version` runs the backend with `--version` alone, passes on its
   output, then prints `typec` and its release on a last line, and exits
-  with the backend's status, or 81 when it cannot be started. Build
-  tools tell compilers apart by the output of `$CC --version`: Meson
+  with the backend's status, or 81 when it cannot be started, or 0 when
+  SIGPIPE ended the backend and the reader of the output is gone: a
+  reader that stops at the first line closes the pipe, and that is no
+  failure. Build tools tell compilers apart by the output of
+  `$CC --version`: Meson
   knows a compiler only by it and reads the compiler's version from it,
   and scripts read its first line. With the backend's lines first and
   unchanged, they see the backend, so

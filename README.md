@@ -1855,10 +1855,12 @@ backend. The rest of the command line does not reach the backend and
 nothing is compiled, as GCC and Clang compile nothing with their
 `--version`; an error in one of `typec`'s own options, such as `--cc=`
 without a path, is still one. The status is the backend's, or 81 when
-it cannot be started; a backend that fails or cannot be started is
-named on stderr, and `typec`'s line is still printed. The release has
-one source, the `version` field of `dune-project`, which the build
-writes into `typec`; a release tag `vX.Y` is made after it is set.
+it cannot be started, or 0 when SIGPIPE ended the backend and the
+reader of the output is gone, as a reader such as `head -1` that stops
+early is no failure; a backend that fails or cannot be started is named
+on stderr, and `typec`'s line is still printed. The release has one
+source, the `version` field of `dune-project`, which the build writes
+into `typec`; a release tag `vX.Y` is made after it is set.
 
 ## The manual page
 

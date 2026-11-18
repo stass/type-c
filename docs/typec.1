@@ -184,8 +184,11 @@ error in one of the options of
 .Nm
 is still one.
 The status is the backend's, or 81 when the backend cannot be started,
-and a backend that fails or cannot be started is named on standard
-error.
+or 0 when SIGPIPE ended the backend and the reader of the output is
+gone, as when a reader such as
+.Ql head -1
+stops early; a backend that fails or cannot be started is named on
+standard error.
 .El
 .Ss Choosing the backend
 The backend is the program that the last

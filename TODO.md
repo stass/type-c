@@ -1529,11 +1529,6 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   cannot join trixie's held C library. Decide between moving the Debian
   host to testing's glibc (forky as the base), a binutils of 2.45 or
   later built for trixie, or testing GCC 16 only on another arm64 host.
-- [Low] `test/run/version.t` failed once on alpine-amd64 with status
-  141: in `typec --cc="$gcc" --version | head -1`, the backend can die of
-  SIGPIPE when `head` closes the pipe before its last write, and typec
-  passes the signal on as its own outcome, while the test says a reader
-  that stops at the first line is no failure.
 - [Low] `test/run/c_header.t` cannot tell `-MD` from `-MMD`, nor `-M`
   from `-MM`: its interface includes no system header and the rules are
   made under `-nostdinc`, so a driver that passed the one for the other
