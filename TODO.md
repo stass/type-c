@@ -1508,6 +1508,18 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   FreeBSD over ssh (x86-64) runs it, with no arm64 or glibc run. Add a
   Debian host that takes the image's `/usr/bin/gcc`, for example by a
   `run.sh` host name that passes `TYPEC_TEST_GCC` to the container.
+- [High] alpine-arm64 fails every test that links GCC with
+  `-fsanitize=address,undefined` (`defer.t`, `nested_tests.t`,
+  `nested_patterns.t`, `slices.t`, `slice_lowering.t`, `containers.t`,
+  `try_expressions.t`): Alpine's GCC 15 has `libasan` and `libubsan` on
+  x86-64 but not on aarch64, while Clang's (compiler-rt) are there on
+  both. Probe each backend for the sanitizers once in
+  `test/run/backends.sh` and report a skip, with a
+  `TYPEC_TEST_REQUIRE_SANITIZERS` that the Debian image, the FreeBSD
+  host and the Apple Silicon gate set; the tests then take the flags
+  from backends.sh instead of each defining `sanitize`. The checks that
+  expect a report of UndefinedBehaviorSanitizer (`nested_tests.t`,
+  `nested_patterns.t`) must run only on a backend that has it.
 - [Low] Restore a `debian-arm64` host to `tools/hosts/run.sh` once
   Debian's gcc-16 and binutils agree on trixie, or once the Debian host
   moves to a newer base. On arm64 GCC 16 writes the AArch64 build
