@@ -349,7 +349,7 @@ constructor, and `typec` refuses the program:
 
 ```console
 $ typec -Wall -Wextra -c smtpd.tc
-smtpd.tc:270: error: the constructor 'Mail' takes one argument for each of its 3 fields [constructor-expression]
+smtpd.tc:270: error: the constructor 'Mail' takes 3 arguments, its fields 'client', 'from' and 'to'; 2 are given [constructor-expression]
 ```
 
 The sender is a field of `Mail` by value, and for it the port keeps

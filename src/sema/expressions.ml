@@ -1876,13 +1876,81 @@ let binder_of context name =
   let binders = context.typed.enclosing.binders in
   Option.bind binders (fun binders -> Hashtbl.find_opt binders name)
 
+(* A variant declaration with the constructor of a name. *)
+type declared_constructor = {
+  variant : Tree.type_declaration;
+  constructor : Tree.constructor;
+}
+
+(* The constructors that [declaration] writes: none unless it declares a
+   variant. *)
+let written_constructors (declaration : Tree.type_declaration) =
+  match declaration.node.definition with
+  | Variant { constructors; _ } -> constructors
+  | Incomplete_variant | Alias _ | Distinct _ | Record_alias _ -> []
+
+let constructor_name (c : Tree.constructor) = (c.node.name.node :> string)
+
+let declared_constructor name (variant : Tree.type_declaration) =
+  let named c = constructor_name c = name in
+  Option.map
+    (fun constructor -> { variant; constructor })
+    (List.find_opt named (written_constructors variant))
+
+(* The constructor [name] of the variant declared last of those in scope
+   at [span]: the innermost, or the unit's over the universe's, which is
+   the one most likely meant. *)
+let constructor_in_scope context (span : Tree.span) name =
+  List.find_map (declared_constructor name) (context.visible_variants span)
+
+(* A variant as its declaration writes it, as 'err' or 'result(T, E)'. *)
+let variant_head (declaration : Tree.type_declaration) =
+  let name = (declaration.node.name.node :> string) in
+  match declaration.node.type_parameters with
+  | [] -> name
+  | parameters ->
+      let parameter (written : Tree.parameter_name) =
+        (written.name.node :> string)
+      in
+      name ^ "(" ^ String.concat ", " (List.map parameter parameters) ^ ")"
+
+(* The end of a refusal of a name that suggests [meant], what the name
+   likely misspells. *)
+let did_you_mean meant = "; did you mean " ^ meant ^ "?"
+
+(* For a name that is not declared in Type-C text: the constructor in
+   scope that it likely misspells. The names of the other declarations
+   in scope do not compete, as the parser keeps no scope at an
+   undeclared name, so a nearer variable does not stop the suggestion. *)
+let misspelt_constructor context span name =
+  let names variant =
+    List.map constructor_name (written_constructors variant)
+  in
+  match is_type_c_text context span with
+  | false -> None
+  | true ->
+      let in_scope = List.concat_map names (context.visible_variants span) in
+      let meant = Misspelling.closest name in_scope in
+      Option.bind meant (constructor_in_scope context span)
+
+let misspelt_constructor_note context span name =
+  match misspelt_constructor context span name with
+  | Some found ->
+      did_you_mean
+        (Printf.sprintf "the constructor %s of %s"
+           (quote (constructor_name found.constructor))
+           (quote (variant_head found.variant)))
+  | None -> ""
+
 (* 6.5.1p2: a name that the parser finds no declaration of. *)
 let undeclared context span name =
   match binder_of context name with
   | Some binder -> bound_elsewhere context span name binder
   | None ->
       context.fail span
-        (Rule.c_text (quote name ^ " is not declared (C11 6.5.1p2)"))
+        (Rule.c_text
+           (quote name ^ " is not declared (C11 6.5.1p2)"
+           ^ misspelt_constructor_note context span name))
 
 (* An undeclared identifier may name a builtin function of the backend
    (design 13.3). One with a prototype has its function type; one that a
@@ -3826,6 +3894,43 @@ let void_fields_note (constructor : Ctype.constructor) =
         " (in this instance the type void removes the field(s) %s)"
         (String.concat ", " (List.map quote names))
 
+(* For a name that no constructor of a variant has: the end of its
+   refusal that suggests the one of [constructors] it likely misspells. *)
+let misspelt_of_variant name (constructors : Ctype.constructor list) =
+  let names =
+    List.map
+      (fun (c : Ctype.constructor) -> (c.constructor_name :> string))
+      constructors
+  in
+  match Misspelling.closest name names with
+  | Some meant -> did_you_mean (quote meant)
+  | None -> ""
+
+(* The name of a field of a constructor, which the parser requires. *)
+let field_name (field : Ctype.member) =
+  match field.member_name with
+  | Some name -> name
+  | None -> invalid_arg "Expressions.field_name: a field without a name"
+
+(* The refusal of the constructor [quoted_name] given [given] arguments
+   for its [fields]. *)
+let wrong_argument_count quoted_name (fields : Ctype.member list) given =
+  let field_names = List.map field_name fields in
+  let takes =
+    match fields with
+    | [ _ ] -> "1 argument"
+    | _ -> Printf.sprintf "%d arguments" (List.length fields)
+  in
+  let is_given =
+    match given with
+    | 1 -> "1 is given"
+    | _ -> Printf.sprintf "%d are given" given
+  in
+  Printf.sprintf "the constructor %s takes %s, %s; %s" quoted_name takes
+    (listed ~one:"its field" ~several:"its fields"
+       (Shown.map quote (Shown.few field_names)))
+    is_given
+
 (* The pattern that matches every value of [constructor], to suggest
    where a case label leaves its field list out. *)
 let ignoring_pattern (constructor : Ctype.constructor) =
@@ -3896,8 +4001,9 @@ let qualified_constructor context (variant : Tree.type_name)
       | None ->
           context.fail constructor.span
             (constructor_message
-               (Printf.sprintf "the variant %s has no constructor %s"
-                  described (quote constructor.node))))
+               (Printf.sprintf "the variant %s has no constructor %s%s"
+                  described (quote constructor.node)
+                  (misspelt_of_variant constructor.node constructors))))
   | None, Some _ ->
       context.fail variant.span
         (constructor_message
@@ -3962,38 +4068,6 @@ let stray_name (expression : Tree.expression) =
         (parenthesized_name callee)
   | _ -> None
 
-(* A variant declaration with the constructor of a name. *)
-type declared_constructor = {
-  variant : Tree.type_declaration;
-  constructor : Tree.constructor;
-}
-
-let declared_constructor name (variant : Tree.type_declaration) =
-  let named (c : Tree.constructor) = (c.node.name.node :> string) = name in
-  match variant.node.definition with
-  | Variant { constructors; _ } ->
-      Option.map
-        (fun constructor -> { variant; constructor })
-        (List.find_opt named constructors)
-  | Incomplete_variant | Alias _ | Distinct _ | Record_alias _ -> None
-
-(* The constructor [name] of the variant declared last of those in scope
-   at [span]: the innermost, or the unit's over the universe's, which is
-   the one most likely meant. *)
-let constructor_in_scope context (span : Tree.span) name =
-  List.find_map (declared_constructor name) (context.visible_variants span)
-
-(* A variant as its declaration writes it, as 'err' or 'result(T, E)'. *)
-let variant_head (declaration : Tree.type_declaration) =
-  let name = (declaration.node.name.node :> string) in
-  match declaration.node.type_parameters with
-  | [] -> name
-  | parameters ->
-      let parameter (written : Tree.parameter_name) =
-        (written.name.node :> string)
-      in
-      name ^ "(" ^ String.concat ", " (List.map parameter parameters) ^ ")"
-
 (* The constructor qualified by its variant, with what a generic one
    still needs. *)
 let qualified_example found name =
@@ -4014,7 +4088,7 @@ let called_example found name =
    called. The refusal says which variant has the constructor and what
    the position expects, or how the constructor is written. *)
 let stray_constructor_message context span position form found =
-  let name = (found.constructor.node.name.node :> string) in
+  let name = constructor_name found.constructor in
   let quoted = quote name and variant = quote (variant_head found.variant) in
   let unqualified_only =
     Printf.sprintf
@@ -5039,12 +5113,9 @@ and construct context (whole : Tree.expression) named arguments =
   | _ :: _, None ->
       refuse (Printf.sprintf "the constructor %s takes arguments" name)
   | _ :: _, Some arguments ->
-      if List.length arguments <> List.length fields then
-        refuse
-          (Printf.sprintf
-             "the constructor %s takes one argument for each of its %d \
-              fields"
-             name (List.length fields));
+      let given = List.length arguments in
+      if given <> List.length fields then
+        refuse (wrong_argument_count name fields given);
       List.iter2 (constructor_argument context named) fields arguments);
   value named.variant_type
 
@@ -6610,10 +6681,17 @@ and no_constructor name (variant : indexed_variant) ~nested =
     Printf.sprintf "%s names no constructor of the variant %s" (quote name)
       (quoted_variant variant.name)
   in
-  if nested then
-    Rule.message Pattern
-      (text ^ "; a field of a variant type is bound with its type, as in `T x`")
-  else Rule.message Pattern text
+  let suggestion =
+    misspelt_of_variant name (Array.to_list variant.constructors)
+  in
+  (* A binding is often named as its constructor in lower case, so a
+     suggestion does not replace this note. *)
+  let binding_note =
+    match nested with
+    | true -> "; a field of a variant type is bound with its type, as in `T x`"
+    | false -> ""
+  in
+  Rule.message Pattern (text ^ binding_note ^ suggestion)
 
 and field_site ~(holder : Ctype.constructor) ~position
     ~(reached : object_reach) index (member : Ctype.member) =

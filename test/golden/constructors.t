@@ -234,6 +234,60 @@ name is undeclared.
   $ ./golden.exe out_of_scope.tc
   out_of_scope.tc:5: error: 'NoMemory' is not declared (C11 6.5.1p2)
   [1]
+
+A name that is not declared and is a few edits from one constructor in
+scope is suggested as that constructor; one as close to two, or too
+short to say which was meant, is not.
+
+  $ cat > misspelt.tc <<'EOF'
+  > type shape = | Circle(double r) | Rect(double w, double h);
+  > shape f(void) { return Circel(1.0); }
+  > EOF
+  $ ./golden.exe misspelt.tc
+  misspelt.tc:2: error: 'Circel' is not declared (C11 6.5.1p2); did you mean the constructor 'Circle' of 'shape'?
+  [1]
+  $ printf 'option(int) g(void) { return Smoe(1); }\n' > misspelt_universe.tc
+  $ ./golden.exe misspelt_universe.tc
+  misspelt_universe.tc:1: error: 'Smoe' is not declared (C11 6.5.1p2); did you mean the constructor 'Some' of 'option(T)'?
+  [1]
+  $ printf 'type pet = | Cat | Car;\npet f(void) { return Cab; }\n' > misspelt_tie.tc
+  $ ./golden.exe misspelt_tie.tc
+  misspelt_tie.tc:2: error: 'Cab' is not declared (C11 6.5.1p2)
+  [1]
+  $ printf 'type e = | A | B;\nint f(void) { return x; }\n' > misspelt_short.tc
+  $ ./golden.exe misspelt_short.tc
+  misspelt_short.tc:2: error: 'x' is not declared (C11 6.5.1p2)
+  [1]
+  $ cat > misspelt_inner.tc <<'EOF'
+  > type s1 = | Circle(double r);
+  > void f(void) {
+  >   type s2 = | Circle(int n);
+  >   (void)Circel;
+  > }
+  > EOF
+  $ ./golden.exe misspelt_inner.tc
+  misspelt_inner.tc:4: error: 'Circel' is not declared (C11 6.5.1p2); did you mean the constructor 'Circle' of 's2'?
+  [1]
+  $ printf 'type e4 = | Circle;\n# 1 "c.h" 1\nstatic int h(void) { return Circel; }\n' > misspelt_c_text.tc
+  $ ./golden.exe misspelt_c_text.tc
+  c.h:1: error: 'Circel' is not declared (C11 6.5.1p2)
+  [1]
+  $ printf 'type shape = | Circle(double r);\nshape s = shape.Circel(1.0);\n' > misspelt_qualified.tc
+  $ ./golden.exe misspelt_qualified.tc
+  misspelt_qualified.tc:2: error: the variant 'shape' has no constructor 'Circel'; did you mean 'Circle'? [constructor-expression]
+  [1]
+  $ cat > misspelt_pattern.tc <<'EOF'
+  > type shape = | Circle(double r) | Rect(double w, double h);
+  > double area(shape s) {
+  >   match (s) {
+  >   case Circel(r): return r;
+  >   default: return 0;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe misspelt_pattern.tc
+  misspelt_pattern.tc:4: error: 'Circel' names no constructor of the variant 'shape'; did you mean 'Circle'? [match-pattern]
+  [1]
   $ cat > c_text_own.tc <<'EOF'
   > type e3 = | Missing;
   > # 1 "c.h" 1

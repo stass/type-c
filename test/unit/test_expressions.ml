@@ -1392,6 +1392,30 @@ let constants () =
   types "x ? (void *)(int)(typeof(half))0 : ip"
     "<a null pointer constant of an opaque value>"
 
+(* The constructor a misspelt name suggests: the one closest, within a
+   bound that grows with the name, and none past the longest name it
+   compares, however long the name. *)
+let misspellings () =
+  let suggests name spellings expected =
+    let actual = Misspelling.closest name spellings in
+    if actual <> expected then
+      fail_case name
+        (Printf.sprintf "suggests %s"
+           (Option.value actual ~default:"nothing"))
+  in
+  suggests "Circel" [ "Circle"; "Rect" ] (Some "Circle");
+  suggests "Rcet" [ "Circle"; "Rect"; "Rect" ] (Some "Rect");
+  suggests "Cab" [ "Cat"; "Car" ] None;
+  suggests "x" [ "A"; "B" ] None;
+  suggests "Rct" [ "Rect" ] (Some "Rect");
+  suggests "Rt" [ "Rect" ] None;
+  suggests "Rect" [ "Rect" ] None;
+  let long = String.make Misspelling.max_length 'a' in
+  suggests (long ^ "b") [ long ] None;
+  suggests ("b" ^ String.sub long 1 (String.length long - 1)) [ long ]
+    (Some long);
+  suggests (String.make 10_000_000 'a') [ String.make 10_000_000 'a' ] None
+
 let () =
   primaries ();
   postfix ();
@@ -1418,4 +1442,5 @@ let () =
   block_linkage ();
   deep_bodies ();
   constants ();
+  misspellings ();
   if !failures > 0 then exit 1

@@ -28,13 +28,13 @@ where an object or an enumeration constant of its name is visible
   > }
   > EOF
   $ ./golden.exe misspelled.tc
-  misspelled.tc:8: error: 'DivByZer' names no constructor of the variant 'eval_error'; a field of a variant type is bound with its type, as in `T x` [match-pattern]
+  misspelled.tc:8: error: 'DivByZer' names no constructor of the variant 'eval_error'; a field of a variant type is bound with its type, as in `T x`; did you mean 'DivByZero'? [match-pattern]
   [1]
   $ cat types.h - > enumerator.tc <<'EOF'
-  > enum { DivByZer };
+  > enum { Failure };
   > int f(res r) {
   >   match (r) {
-  >   case Err(DivByZer):
+  >   case Err(Failure):
   >     return 1;
   >   default:
   >     return 0;
@@ -42,7 +42,7 @@ where an object or an enumeration constant of its name is visible
   > }
   > EOF
   $ ./golden.exe enumerator.tc
-  enumerator.tc:8: error: 'DivByZer' names no constructor of the variant 'eval_error'; a field of a variant type is bound with its type, as in `T x` [match-pattern]
+  enumerator.tc:8: error: 'Failure' names no constructor of the variant 'eval_error'; a field of a variant type is bound with its type, as in `T x` [match-pattern]
   [1]
   $ cat types.h - > typed.tc <<'EOF'
   > int f(res r) {

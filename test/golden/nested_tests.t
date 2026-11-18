@@ -25,7 +25,7 @@ refused (rule 3).
   > }
   > EOF
   $ ./golden.exe misspelled.tc
-  misspelled.tc:6: error: 'DivByZer' names no constructor of the variant 'eval_error'; a field of a variant type is bound with its type, as in `T x` [match-pattern]
+  misspelled.tc:6: error: 'DivByZer' names no constructor of the variant 'eval_error'; a field of a variant type is bound with its type, as in `T x`; did you mean 'DivByZero'? [match-pattern]
   [1]
   $ cat types.h - > pointer.tc <<'EOF'
   > int f(const list *l) {

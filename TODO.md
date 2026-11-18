@@ -122,15 +122,15 @@ The items are ordered by how often real code meets them.
   `Parser.quoted` also cuts at 40 bytes, which may split a UTF-8
   sequence, where the typing stages cut with `Shown.cut`; one cut goes
   with the one quoting. Source: review; probe.
-- [Low] A misspelt constructor, `Circel(1.0)`, gives "'Circel' is not
-  declared (C11 6.5.1p2)". Proposed: add "; did you mean the
-  constructor 'Circle' of 'shape'?" when one constructor of a visible
-  variant is within an edit distance of one or two. Source: review case
-  03; probe.
-- [Low] A constructor given too few arguments: "the constructor
-  'Triangle' takes one argument for each of its 3 fields
-  [constructor-expression]". Proposed: "...; it is given 2". Source:
-  the smtp example's README; probe.
+- [Medium] The suggestion of a constructor for an undeclared name
+  (`misspelt_constructor` in `src/sema/expressions.ml`) weighs only the
+  constructors in scope: `cuont` with a parameter `count` and a
+  constructor `Count` suggests the constructor, and an undeclared `err`
+  suggests `Err` of `result(T, E)`. The backend never sees such a
+  unit, so nothing else suggests the nearer name. Proposed: the parser
+  keeps the scope at an undeclared name (its `Undeclared` resolution),
+  and the ordinary names in it compete, a constructor being suggested
+  only when it alone is closest. Source: review.
 - [Low] A mismatched argument of a generic call, `put(&b, "x")` with
   `generic(T) void put(box(T) *b, T v)`, gives "a value of type 'char
   *' does not convert to 'double' without a cast", naming neither the

@@ -1878,7 +1878,11 @@ let constructors () =
   constructor_error "return A();"
     "the constructor 'A' has no fields, so it is written without parentheses";
   constructor_error "return B(1);"
-    "the constructor 'B' takes one argument for each of its 2 fields";
+    "the constructor 'B' takes 2 arguments, its fields 'i' and 'next'; 1 \
+     is given";
+  constructor_error "return B(1, 0, 2);"
+    "the constructor 'B' takes 2 arguments, its fields 'i' and 'next'; 3 \
+     are given";
   (* An argument converts to its field as if by assignment, so a variant
      or a plain structure there is refused as anywhere in Type-C text
      (design 5); in C text the constructor refuses the structure, as C

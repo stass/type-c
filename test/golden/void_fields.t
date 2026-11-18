@@ -85,7 +85,7 @@ removed.
   [1]
   $ printf 'type two(A, B) = | Two(A a, B b);\ntwo(void, int) t = Two(1, 2);\n' > arity.tc
   $ ./golden.exe arity.tc
-  arity.tc:2: error: the constructor 'Two' takes one argument for each of its 1 fields (in this instance the type void removes the field(s) 'a') [constructor-expression]
+  arity.tc:2: error: the constructor 'Two' takes 1 argument, its field 'b'; 2 are given (in this instance the type void removes the field(s) 'a') [constructor-expression]
   [1]
   $ printf 'type two(A, B) = | Two(A a, B b);\ntwo(void, int) t = Two;\n' > bare.tc
   $ ./golden.exe bare.tc
