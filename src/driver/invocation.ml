@@ -91,5 +91,7 @@ let error_message = function
       "--emit-c cannot be used with --emit-c-header: one writes the C of a \
        .tc unit, the other the header of a .tci interface"
   | Invalid_trap_function name ->
-      Printf.sprintf "--trap-function= needs an ASCII C identifier, not %S"
-        name
+      Printf.sprintf
+        "--trap-function= needs an ASCII C identifier that does not begin \
+         with `%s`, not %S"
+        Typec_syntax.Parser.generated_prefix name

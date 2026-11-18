@@ -223,11 +223,20 @@ The items are ordered by how often real code meets them.
   Before Pilot C (plan 4.7) is built as its firmware is, decide whether
   a spec file may reach the link step alone, or the pilot links in a
   separate command.
-- [Low] `--trap-function=` takes a C keyword (`int`, `_Bool`) or a name
-  reserved to typec (`__tc_trap`), which then fails as a backend error at
-  `<typec>` rather than as a refusal of the option. Refusing them needs
-  the keyword sets of the dialect and the `__tc_` prefix, which
-  `src/syntax/parser.ml` keeps private, in one place the driver reads.
+- [Low] `--trap-function=` takes a C keyword (`int`, `_Bool`), which
+  then fails as a backend error at `<typec>` rather than as a refusal of
+  the option. Refusing it needs the keyword sets of the dialect in one
+  place the driver reads. A name of the implementation's own space is
+  taken too: `--trap-function=__builtin_unreachable` makes every trap
+  undefined behaviour, since the backend may drop the `__builtin_trap()`
+  after it.
+- [Medium] `Parser.generated_prefix` is the source of `__tc_` only for
+  the two refusals that read it (the parser's and `Trap.calling`); every
+  site that writes a generated name spells `"__tc_..."` itself
+  (`lowering.ml`, `emitter.ml`, `assumptions.ml`, `encoding.ml`,
+  `target_query.ml`). One small module owning the prefix and a
+  constructor of generated names, through which every site and both
+  refusals go, makes a name the user may declare unable to clash.
 - [Low] `Front_end.lower` hands the same trap to `Lowering.edits` and to
   the `lowered` record that `Emitter.emit` writes its definition from;
   another builder of `lowered` could pair edits with another trap. Have
@@ -354,10 +363,6 @@ the package, in the order of its commits:
   header, the macro brackets and the macro probe among them, to the
   unit's output limit and count them in `--stats` (3.5 rule 7);
   `--stats` reports the counts of the unit's lowering alone.
-- [Low] `Trap.calling` takes a name of typec's reserved `__tc_` space:
-  `--trap-function=__tc_trap` defines `__tc_trap` as calling itself, so
-  a trap recurses instead of trapping. Refuse the reserved prefix, with
-  the message of `Invalid_trap_function`.
 - [Medium] `Lowering.edits` and `Lowering.header_text` check at run time
   that their declarations were read for their product
   (`Declarations.product`); a phantom parameter of `Declarations.t`

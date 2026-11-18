@@ -11,10 +11,15 @@ let is_identifier_start c =
 let is_identifier_char c =
   match c with '0' .. '9' -> true | c -> is_identifier_start c
 
+(* A name of typec's reserved space could be __tc_trap itself, which
+   would then call itself rather than trap. *)
 let calling name =
   if name <> ""
      && is_identifier_start name.[0]
      && String.for_all is_identifier_char name
+     && not
+          (String.starts_with ~prefix:Typec_syntax.Parser.generated_prefix
+             name)
   then Some (Function name)
   else None
 
@@ -22,7 +27,7 @@ let builtin_call = "__builtin_trap()"
 
 (* The one function that every trap calls under --trap-function, under a
    name reserved to typec, and its head. *)
-let trap_function = "__tc_trap"
+let trap_function = Typec_syntax.Parser.generated_prefix ^ "trap"
 
 let trap_function_head =
   Printf.sprintf "static inline _Noreturn void %s(void)" trap_function

@@ -49,6 +49,10 @@ val max_depth : int
     a leaf, chains that the parser reads in loops included; one more is
     an error. *)
 
+val generated_prefix : string
+(** The prefix of every name that typec generates (design 13.5), which
+    the parser refuses in a unit's identifiers. *)
+
 val parse :
   keywords:Keyword_set.t ->
   Reader.t ->

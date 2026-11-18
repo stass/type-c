@@ -183,6 +183,9 @@ let trap_cases =
     ( "no name",
       [ "--trap-function=" ],
       Error (Invocation.Invalid_trap_function "") );
+    ( "a name reserved to typec",
+      [ "--trap-function=__tc_trap" ],
+      Error (Invocation.Invalid_trap_function "__tc_trap") );
   ]
 
 let trap_outcome arguments =

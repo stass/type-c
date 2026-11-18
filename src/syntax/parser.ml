@@ -696,7 +696,6 @@ let continue_target state start =
   jump_targets state start "continue" continue_leaves
     ~no_target:(Rule.c_text "continue outside a loop (C11 6.8.6.2p1)")
 
-(* The names that typec generates begin with this (design 13.5). *)
 let generated_prefix = "__tc_"
 
 (* A Type-C translation unit holds no identifier that lowering may

@@ -63,7 +63,14 @@ of typec's environment errors (src/driver/exit_status.ml).
   typec: --cc= needs the path of a C compiler
   [81]
   $ typec --trap-function='stop(); exit' -c hello.c
-  typec: --trap-function= needs an ASCII C identifier, not "stop(); exit"
+  typec: --trap-function= needs an ASCII C identifier that does not begin with `__tc_`, not "stop(); exit"
+  [81]
+
+A trap function named in typec's reserved space, such as __tc_trap,
+which every trap calls, would call itself.
+
+  $ typec --trap-function=__tc_trap -c hello.c
+  typec: --trap-function= needs an ASCII C identifier that does not begin with `__tc_`, not "__tc_trap"
   [81]
 
 A C compiler that runs typec again, such as a cc first on PATH that is a

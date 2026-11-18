@@ -1637,8 +1637,8 @@ older one with a message naming the oldest supported releases.
 Without a `.tc` input `typec` replaces itself with the backend. Exit
 status: the backend's own; a backend ended by a signal ends `typec`
 with the same signal. `typec` exits with 81 when `--cc=` has no path,
-`--trap-function=` names no C identifier, the backend cannot be started
-or the backend runs `typec` again, after one
+`--trap-function=` names no C identifier or one reserved to typec, the
+backend cannot be started or the backend runs `typec` again, after one
 message on stderr (with `--print-target`, a second says that the backend
 gave no target model).
 
@@ -1717,7 +1717,8 @@ stdout; the command line then has exactly one input, a `.tc` file.
 tag, a slice index out of range) call `_Noreturn void NAME(void)`, which
 the program supplies, instead of executing `__builtin_trap()` alone; a
 freestanding program uses it to report the failure (design 10.5). NAME
-is a C identifier of ASCII letters, digits and underscores, and the last
+is a C identifier of ASCII letters, digits and underscores outside the
+names reserved to typec, which begin with `__tc_`, and the last
 `--trap-function=` wins. NAME is the name the program defines, not a
 macro: the emitted C is already preprocessed, so `-DNAME=...` does not
 change it. A `.tc` unit that holds a Type-C construct declares NAME

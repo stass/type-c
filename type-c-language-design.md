@@ -5301,7 +5301,9 @@ report the failure. Where the compiler has no such builtin, the call is
 followed by an endless loop.
 
 `name` is a C identifier of ASCII letters, digits and underscores; the
-driver refuses any other text, which would reach the C unquoted. A
+driver refuses any other text, which would reach the C unquoted. It
+also refuses a name reserved to typec (13.5): `__tc_trap` would call
+itself. A
 declaration in a block may hide `name` where a trap stands, so a trap
 does not call it there. It calls `__tc_trap`, a name reserved to typec
 that nothing hides (13.5). A unit with a Type-C construct declares it

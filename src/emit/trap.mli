@@ -14,7 +14,8 @@ val builtin : t
 val calling : string -> t option
 (** [calling name] is the trap that calls the function [name], or None
     unless [name] is a C identifier of ASCII letters, digits and
-    underscores that does not begin with a digit. [name] comes from the
+    underscores that does not begin with a digit or with
+    {!Typec_syntax.Parser.generated_prefix}. [name] comes from the
     command line and goes into the C text unquoted, so this is the one
     check that keeps other text out of it. *)
 
