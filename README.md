@@ -1493,30 +1493,20 @@ macro cannot check a `switch` either.
 
 ## Status
 
-Type-C is in development: the [design](type-c-language-design.md)
-specifies the whole language, and the
-[plan](type-c-implementation-plan.md) builds it in stages, each ending
-in a measured gate. Stages 1 and 2 are built and have met their gates:
-variants, `match` and `if (case ...)`, distinct types, `private` and
-interface files (`.tci`), generic types, `option` and `result`, `try`
-and `defer`. Stage 2's gate rests on
-[Pilot B](#measured-on-a-real-library).
-
-Stage 3 is in progress, and **not ready to use** yet. Slices with
-checked indexing and `str` are built,
-`slice(uint8_t) bytes = slice_from_array(buffer);`, and so are generic
-functions, `generic(T) T *vector_last(vector(T) *v);`, and `try` inside
-an expression, `return fit(try eval(l) + try eval(r));`, which
-[design 5.1](type-c-language-design.md#51-try) specifies.
-
-Nested patterns, which
-[design 4.7](type-c-language-design.md#47-nested-patterns) specifies,
-are built in `match`, such as `case Err(DivByZero):`, and in the
-single-pattern test, such as `while (case At(*Cons(h, t)) = c)`.
+Type-C 1.0 is the core language, frozen: variants, `match`,
+`if (case ...)` and nested patterns, distinct types, `private` and
+interface files (`.tci`), generic types and functions, `option` and
+`result`, `try` and `defer`, and slices with checked indexing and
+`str`. `typec --emit-c-header` writes the C header of an interface for
+C clients. The [design](type-c-language-design.md) specifies the whole
+language, and the [plan](type-c-implementation-plan.md) built it in
+stages, each ending in a measured gate, and the three pilots build
+with this release
+([Measured on a real library](#measured-on-a-real-library)).
 
 Designed and **not yet implemented**: a checked mode, whose rules are
 provisional, that rules out specific classes of memory errors in the
-functions it covers.
+functions it covers (Stage 5 of the plan).
 
 ## Try it
 
