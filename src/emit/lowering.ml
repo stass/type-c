@@ -2406,27 +2406,22 @@ let definition_text context instance pieces : Emitter.bracketed_text =
       Guarded
         { instance = Typec_sema.Encoding.instance_c_name instance; pieces }
 
-(* The span of the definition of a generic, none for a generic type
-   that the unit declares alone (design 3.1 rule 4). *)
-let definition_span (generic : Typec_sema.Declarations.generic_definition) =
-  match generic with
-  | Type_generic { node = { definition = Incomplete_variant; _ }; _ } -> None
-  | Type_generic declaration -> Some declaration.span
-  | Function_generic { span; _ } -> Some span
-
 (* A header declares each instance with its layout typedef, where its
    step reads the generic defined (design 9.3); a C unit writes none. *)
 let layout_typedef context location instance generic =
   let output = context.output in
-  match
-    ( Typec_sema.Declarations.product context.declarations,
-      definition_span generic )
-  with
-  | Unit_text, _ | Header_text, None -> []
-  | Header_text, Some span ->
-      let definition = Layout.definition_text (Emitter.unit output) span in
-      let name = Typec_sema.Encoding.instance_c_name instance in
-      [ Emitter.generated output location (Layout.typedef name ~definition) ]
+  let declarations = context.declarations in
+  match Typec_sema.Declarations.product declarations with
+  | Unit_text -> []
+  | Header_text -> (
+      match
+        Layout.definition_text declarations (Emitter.unit output) generic
+      with
+      | None -> []
+      | Some definition ->
+          let name = Typec_sema.Encoding.instance_c_name instance in
+          let typedef = Layout.typedef name ~definition in
+          [ Emitter.generated output location typedef ])
 
 let placement_text context (placement : Typec_sema.Declarations.placement) :
     Emitter.bracketed_text =

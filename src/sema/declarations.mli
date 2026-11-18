@@ -183,6 +183,13 @@ val latest_generic : t -> Tree.type_declaration -> Tree.type_declaration
     where one does (design 3.1 rule 4), which is its definition. The
     declaration of every application is a generic's. *)
 
+val applied_generic : t -> int -> generic_definition option
+(** [applied_generic result index] is the generic of the application
+    whose first token is the token [index], wherever the unit's reading
+    met it, a definition of a generic included: the latest declaration
+    of a generic type, as {!latest_generic} gives it, or the definition
+    of a generic function; [None] where no application begins. *)
+
 val type_declarations : t -> Tree.type_declaration list
 (** The type declarations that the reader has read, in source order:
     those that lowering replaces (design 13.5). *)

@@ -109,6 +109,8 @@ type t = {
   typed : Expressions.t;
   type_declarations : (Tree.declaration_id, Tree.type_declaration) Hashtbl.t;
   generics : (string, generic) Hashtbl.t;
+  generic_definitions : (string, generic_definition) Hashtbl.t;
+  applied_generics : (int, string) Hashtbl.t;
   instance_bytes : int;
   tag_max : Exact_integer.t;
   copy_bytes : int;
@@ -162,6 +164,16 @@ let latest_generic result (generic : Tree.type_declaration) =
   match Hashtbl.find_opt result.generics (generic.node.name.node :> string) with
   | Some { declaration; _ } -> declaration
   | None -> invalid_arg "Declarations.latest_generic: no generic"
+
+let named_generic result name =
+  match Hashtbl.find_opt result.generics name with
+  | Some { declaration; inexact = _ } -> Some (Type_generic declaration)
+  | None -> Hashtbl.find_opt result.generic_definitions name
+
+let applied_generic result index =
+  Option.bind
+    (Hashtbl.find_opt result.applied_generics index)
+    (named_generic result)
 
 let typed result = result.typed
 let instance_bytes result = result.instance_bytes
@@ -296,6 +308,9 @@ type state = {
       (* the type that each non-generic type declaration of the universe
          text names, as [str] names [slice(const char)] *)
   mutable applied_at : Tree.span Ctype.Instances.t;
+  applied_generics : (int, string) Hashtbl.t;
+      (* the generic of each application read, by the index of its first
+         token, which a trial and an instance reading record alike *)
   mutable slice_generic : Tree.type_declaration option;
       (** the universe generic [slice] (design section 8), once read *)
   mutable nesting : nesting option;
@@ -3409,6 +3424,8 @@ and generic_declaration state span name =
    implicit. *)
 and note_application state instance arguments span =
   state.applied_at <- Ctype.Instances.add instance span state.applied_at;
+  Hashtbl.replace state.applied_generics span.first
+    (instance.generic :> string);
   List.iter (refuse_changed_mention state) arguments;
   let placements = state.placements in
   let first_use = not (Ctype.Instances.mem instance placements.used) in
@@ -5128,6 +5145,7 @@ let read target ~product text (scopes : Parser.scopes) =
       generics = Hashtbl.create 16;
       universe_aliases = Hashtbl.create 1;
       applied_at = Ctype.Instances.empty;
+      applied_generics = Hashtbl.create 16;
       slice_generic = None;
       instance_bytes = 0;
       copy_bytes = 0;
@@ -5154,12 +5172,14 @@ let read target ~product text (scopes : Parser.scopes) =
   match Fun.protect ~finally:end_deferral read_all with
   | items ->
       let { tags; entities; tag_types; linked; typed; type_declarations;
-            generics; placements; instance_bytes; copy_bytes;
-            longest_instance_code; zero_initialisers; _ } =
+            generics; generic_definitions; applied_generics; placements;
+            instance_bytes; copy_bytes; longest_instance_code;
+            zero_initialisers; _ } =
         state
       in
       Ok { product; tags; items; placements; entities; tag_types; linked; typed;
-           type_declarations; generics; instance_bytes; copy_bytes;
+           type_declarations; generics; generic_definitions;
+           applied_generics; instance_bytes; copy_bytes;
            longest_instance_code; zero_initialisers;
            tag_max = int_max target }
   | exception (Failed error | Instance_failed error | Over_budget error) ->

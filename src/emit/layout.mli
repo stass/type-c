@@ -10,12 +10,22 @@
     which a C client that includes both refuses. *)
 
 val definition_text :
-  Typec_cpp.Reader.t -> Typec_syntax.Tree.span -> string
-(** [definition_text unit span] is the text that a layout typedef
-    digests: each token of [span] in [unit] as
-    {!Typec_cpp.Reader.spelling} spells it, followed by one space, so
-    that neither the white space between the tokens nor the spelling of
-    an identifier by universal character names changes it. *)
+  Typec_sema.Declarations.t ->
+  Typec_cpp.Reader.t ->
+  Typec_sema.Declarations.generic_definition ->
+  string option
+(** [definition_text declarations unit generic] is the text that the
+    layout typedef of an instance of [generic] digests: the definition
+    of [generic] in [unit], then that of each generic that it applies,
+    transitively, each once, in the order in which their applications
+    first stand, so that the text names the whole layout that the
+    definition depends on; a generic declared and not defined (design
+    3.1 rule 4) adds its declaration. A definition is each of its
+    tokens as {!Typec_cpp.Reader.spelling} spells it, followed by one
+    space, so that neither the white space between the tokens nor the
+    spelling of an identifier by universal character names changes it,
+    and then a line break. [None] where [generic] itself is declared
+    and not defined, which has no definition to digest. *)
 
 val typedef : Typec_syntax.Spelling.c_name -> definition:string -> string
 (** [typedef instance ~definition] is the layout typedef of [instance]

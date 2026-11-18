@@ -458,8 +458,8 @@ first definition for both.
   >     "$@" | sort -u
   > }
   $ layouts left.h right.h
-  struct __tc_digest__43767039c7f63fb6cd06d693c1ba41d2 * __tc_layout__vec__i
-  struct __tc_digest__75d53cead16f94a95c10e912d4c342ec * __tc_layout__link__i
+  struct __tc_digest__5eb0e45a4576cd1a71c1954987705c7c * __tc_layout__vec__i
+  struct __tc_digest__9ead403774b79a4ecbe873d5775a0e23 * __tc_layout__link__i
   $ cat > vector.tci <<'EOF'
   > #ifndef VECTOR_TCI
   > #define VECTOR_TCI
@@ -491,6 +491,72 @@ first definition for both.
   refused
   refused
   refused
+
+The digest takes in, with the generic's own text, the definitions of the
+generics that it applies, transitively, so a difference there is refused
+too where a header only declares the outer instance and so names no
+inner one. Two libraries share outer.tci, whose generic outer applies an
+inner that each defines in its own inner.tci; one.h and two.h each
+declare outer(struct op) alone, as struct op is incomplete, and a client
+that includes both fails to compile on its layout typedef.
+
+  $ mkdir lib1 lib2
+  $ cat > lib1/inner.tci <<'EOF'
+  > #ifndef INNER_TCI
+  > #define INNER_TCI
+  > type inner(T) = struct { T a; };
+  > #endif
+  > EOF
+  $ cat > lib2/inner.tci <<'EOF'
+  > #ifndef INNER_TCI
+  > #define INNER_TCI
+  > type inner(T) = struct { T a; T b; };
+  > #endif
+  > EOF
+  $ cat > outer.tci <<'EOF'
+  > #ifndef OUTER_TCI
+  > #define OUTER_TCI
+  > #include "inner.tci"
+  > type outer(T) = struct { inner(T) i; };
+  > #endif
+  > EOF
+  $ for name in one two; do
+  >   cat > $name.tci <<EOF
+  > #include "outer.tci"
+  > struct op;
+  > void ${name}_take(outer(struct op) *p);
+  > EOF
+  > done
+  $ (cd lib1 && typec --emit-c-header inner.tci)
+  $ (cd lib2 && typec --emit-c-header inner.tci)
+  $ typec --emit-c-header -I lib1 outer.tci
+  $ typec --emit-c-header -I lib1 one.tci
+  $ typec --emit-c-header -I lib2 two.tci
+  $ layouts one.h two.h | sed 's/__[0-9a-f]* /__D /'
+  struct __tc_digest__D * __tc_layout__outer__T2op
+  struct __tc_digest__D * __tc_layout__outer__T2op
+  $ for cc in "$clang" "$gcc"; do
+  >   for std in c11 gnu17; do
+  >     "$cc" -std=$std $strict -I lib1 -DFIRST='"one.h"' \
+  >       -DSECOND='"two.h"' -c clash.c -o clash.o 2>&1 | grep -A1 'error:' |
+  >       grep -q '__tc_layout__outer__T2op' && echo refused
+  >   done
+  > done
+  refused
+  refused
+  refused
+  refused
+
+Generated from one inner, the two headers write one typedef and compile
+together.
+
+  $ typec --emit-c-header -I lib1 two.tci
+  $ for cc in "$clang" "$gcc"; do
+  >   for std in c11 gnu17; do
+  >     "$cc" -std=$std $strict -I lib1 -DFIRST='"one.h"' \
+  >       -DSECOND='"two.h"' -c clash.c -o clash.o || echo "failed: $cc $std"
+  >   done
+  > done
 
 A header defines at its end, each under its guard, the instances that
 its interface names and that no point of it needed complete, where
@@ -528,9 +594,9 @@ together in either order.
   grip.h:#ifndef __tc_instance__vec__l
   grip.h:#define __tc_instance__vec__l
   $ layouts hold.h
-  struct __tc_digest__43767039c7f63fb6cd06d693c1ba41d2 * __tc_layout__vec__l
-  struct __tc_digest__75d53cead16f94a95c10e912d4c342ec * __tc_layout__link__T6secret
-  struct __tc_digest__75d53cead16f94a95c10e912d4c342ec * __tc_layout__link__i
+  struct __tc_digest__5eb0e45a4576cd1a71c1954987705c7c * __tc_layout__vec__l
+  struct __tc_digest__9ead403774b79a4ecbe873d5775a0e23 * __tc_layout__link__T6secret
+  struct __tc_digest__9ead403774b79a4ecbe873d5775a0e23 * __tc_layout__link__i
   $ cat > held.tc <<'EOF'
   > #include <stddef.h>
   > #include "hold.h"

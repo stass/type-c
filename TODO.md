@@ -344,15 +344,19 @@ definition under the guard of the trap function, and under the
 dependency options the rule of the header (design 9.3). The rest of
 the package, in the order of its commits:
 
-- [Medium] A layout digest covers its generic's tokens alone, so an
-  instance that one header defines and another only declares hides a
-  difference in a generic that its definition applies: with `inner(T)`
-  defined two ways and one `outer(T) = struct { inner(T) i; }`, a header
-  that cannot define `outer(struct op)` writes `outer`'s layout typedef
-  with the other's digest and none for `inner`, and the client compiles
-  (design 9.3, section 14). Digesting with the generic's tokens those of
-  every generic that it applies, transitively and in one order, closes
-  it without reading the definition.
+- [Medium] A layout digest follows the applications of generics in a
+  definition but not a typedef name or a tag that it names: with
+  `typedef inner(int) inner_int;` or `struct holder { inner(long) x; }`
+  in a shared `outer.tci` and `outer(T) = struct { inner_int i; }`, two
+  libraries that define `inner` apart write one digest for
+  `outer(struct op)`, and only `outer.h` writes a layout typedef for
+  `inner(int)`. A header that writes the layout typedef of every
+  instance that its step reads, not only those that it declares, may
+  close it (design 9.3, section 14).
+- [Medium] `Layout.definition_text` walks the closure again for every
+  instance, so a header of M instances over a chain of N generics costs
+  N times M; memoise it per generic and charge the spelt bytes to a
+  budget as `instance_budget` does.
 - [Low] The digested tokens are the `-E` step's, so one generic that two
   headers reach through different backends or macro environments
   (`INT_MAX` spelt `2147483647` by Clang and `0x7fffffff` by GCC,
