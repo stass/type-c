@@ -3,6 +3,12 @@ SPDX-License-Identifier: BSD-2-Clause
 Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 -->
 
+<!--
+test/run/example_readmes.t checks the console blocks of this file on
+Clang and GCC, but those marked untested: test/run/readme.sh says how
+the blocks are marked.
+-->
+
 # ringbuf: firmware with no C library
 
 A small device answers commands on its serial port. The UART interrupt
@@ -10,6 +16,7 @@ puts each byte it receives into a ring buffer; the main loop takes the
 bytes out, assembles lines, and queues a reply to each in a second ring
 for the UART to send:
 
+<!-- untested: it is a session on the serial port of the device -->
 ```console
 set led 1
 ok
@@ -75,6 +82,7 @@ An object built this way needs from its environment exactly the names
 it leaves undefined, which `nm -u` lists. On the macOS host, which
 prefixes each C name with `_`:
 
+<!-- untested: the names are those of the macOS host -->
 ```console
 $ nm -u firmware.o original/firmware.o
 
@@ -147,8 +155,7 @@ byte. `make check` runs it:
 ```console
 $ ./stray
 stray: panic
-$ echo $?
-3
+[3]
 ```
 
 The C ring, given the same head, reads past its storage and returns

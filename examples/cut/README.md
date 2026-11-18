@@ -6,6 +6,12 @@ The excerpts of original/cut.c and cut.tc below keep the BSD-3-Clause
 license of those files.
 -->
 
+<!--
+test/run/example_readmes.t checks the console blocks of this file on
+Clang and GCC, but those marked untested: test/run/readme.sh says how
+the blocks are marked.
+-->
+
 # cut: a FreeBSD utility in Type-C
 
 [`cut.tc`](cut.tc) is FreeBSD's `cut(1)` ported to Type-C, and
@@ -585,6 +591,7 @@ what is left, or reallocates a pointer that `malloc` never returned. And
 the final `free` frees such a pointer whenever the loop moved it. Built
 with AddressSanitizer:
 
+<!-- untested: the report of AddressSanitizer differs from run to run -->
 ```console
 $ printf 'abcdefg\n0123456789\n' | LC_ALL=en_US.UTF-8 ./cut-asan -b 1-2 -n
 ==74765==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602000000100 ...

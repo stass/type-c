@@ -281,11 +281,11 @@ The items are ordered by how often real code meets them.
   input" and sends the user to `--emit-c`, which `--emit-c-header`
   refuses. Build the message in `src/driver/pipeline.ml` from the kind
   of input that the command has.
-- [Medium] The console blocks of `examples/*/README.md` are not tested,
-  so they kept the diagnostic format of before the source line was
-  printed until a review found them. Run each example's README through
-  `test/run/readme.sh`, turning its `sed` and diff mutations into
-  commands that build the mutated copy.
+- [Low] Two console blocks of `examples/smtp/README.md` that show
+  `typec` refusing a program are marked untested, because the page
+  describes the change in words without showing it: the arm of `Auth`
+  in `mail`, and `from.text` in `rset`. Show each as a diff block with
+  an edit marker, so that `test/run/example_readmes.t` runs them.
 
 ## C headers (plan package 4.1)
 

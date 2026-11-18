@@ -153,6 +153,16 @@
  (applies_to reference)
  (deps readme.sh ../../docs/reference.md))
 
+; example_readmes.t checks the README of each example of examples/ the
+; same way, on a build of the example.
+
+(cram
+ (applies_to example_readmes)
+ (deps
+  readme.sh
+  (source_tree ../../examples))
+ (enabled_if %{bin-available:make}))
+
 ; make_rule.t, ninja_rule.t and cmake_rule.t build with the rules that
 ; README.md shows, each where the host has its build tool.
 

@@ -3,6 +3,12 @@ SPDX-License-Identifier: BSD-2-Clause
 Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 -->
 
+<!--
+test/run/example_readmes.t checks the console blocks of this file on
+Clang and GCC, but those marked untested: test/run/readme.sh says how
+the blocks are marked.
+-->
+
 # dns: a DNS response parser in Type-C
 
 [`original/dns.c`](original/dns.c) reads a DNS response message from a
@@ -40,6 +46,7 @@ answer github.com. 37 IN A 172.182.252.133
 $ ./dns tests/invalid/pointer-to-itself.bin
 header id 4660 flags 0x8180 questions 1 answers 0 authority 0 additional 0
 dns: tests/invalid/pointer-to-itself.bin: compression loop at offset 12
+[1]
 ```
 
 ## The tests
@@ -240,6 +247,7 @@ that check from the original:
 and the program reads past the end of the message. Built with
 AddressSanitizer:
 
+<!-- untested: the report of AddressSanitizer differs from run to run -->
 ```console
 $ clang -g -fsanitize=address -o dns-asan dns.c
 $ ./dns-asan tests/invalid/rdlength-past-end.bin
@@ -259,6 +267,7 @@ READ of size 4 at 0x60400000033b thread T0
 Built without it, the program says nothing and prints an address made
 of two bytes of the message and two of the heap:
 
+<!-- untested: the original without the check prints bytes of the heap -->
 ```console
 $ ./dns tests/invalid/rdlength-past-end.bin
 header id 4660 flags 0x8180 questions 1 answers 1 authority 0 additional 0
@@ -279,6 +288,7 @@ Delete the same two lines from the port, and it traps at the
 `slice_sub` that makes the record's reader, because the record would
 end past the end of the message:
 
+<!-- untested: the shell names the trap and the process in words of its own -->
 ```console
 $ sh -c './dns tests/invalid/rdlength-past-end.bin; echo $?'
 header id 4660 flags 0x8180 questions 1 answers 1 authority 0 additional 0

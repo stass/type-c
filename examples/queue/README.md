@@ -3,6 +3,12 @@ SPDX-License-Identifier: BSD-2-Clause
 Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 -->
 
+<!--
+test/run/example_readmes.t checks the console blocks of this file on
+Clang and GCC, but those marked untested: test/run/readme.sh says how
+the blocks are marked.
+-->
+
 # queue: `sys/queue.h` against a typed list
 
 [`original/sched.c`](original/sched.c) is a small round-robin job
@@ -156,6 +162,7 @@ killed job vanishes from `ps`, keeps running, and is never freed, since
 `free_jobs` walks `all`. Were the job last on `all`, the macro would also
 point the tail of `ready` into `all`.
 
+<!-- untested: the commands run the original with the mistake -->
 ```console
 $ printf 'add a 3\nadd b 3\nadd c 3\nkill b\nrun 1\nps\n' | ./sched
 a: ran 1, 2 left
@@ -168,8 +175,12 @@ c 2 ready
 The port has no link to name. The nearest mistake is to hand a node of
 `ready` to the other list, and `typec` refuses it:
 
-```c
-		list_remove(&s->all, n);
+<!-- stage: wrong_link -->
+<!-- edit: sched.tc -->
+```diff
+ 			continue;
+-		list_remove(&s->ready, n);
++		list_remove(&s->all, n);
 ```
 
 ```console
@@ -195,6 +206,7 @@ from the head of the other.
 The job now links to itself through `all_link`, and the next walk of
 `all` never ends:
 
+<!-- untested: the commands run the original with the mistake -->
 ```console
 $ printf 'add a 2\nps\n' | ./sched | head -3
 a 2 ready
@@ -206,8 +218,11 @@ In the port the same slip passes a `struct job *` where a
 `list(struct job)` takes a `struct job`, and `typec` refuses the
 argument itself, as C refuses the same assignment:
 
-```c
-		queued = list_insert_tail(&s->all, j);
+<!-- stage: wrong_list -->
+<!-- edit: sched.tc -->
+```diff
+-		queued = list_insert_tail(&s->ready, j);
++		queued = list_insert_tail(&s->all, j);
 ```
 
 ```console
@@ -227,6 +242,7 @@ just removed. With FreeBSD's `queue.h` that works by accident:
 output is right. Built with `-DQUEUE_MACRO_DEBUG_TRASH`, which
 overwrites them, the same program dies of a segmentation fault:
 
+<!-- untested: the commands build the original with the mistake -->
 ```console
 $ cc -Wall -Wextra -Werror -DQUEUE_MACRO_DEBUG_TRASH -o sched-trash sched.c
 $ printf 'add a 1\nadd b 2\nadd c 3\nrun 1\n' | ./sched-trash; echo $?
@@ -239,6 +255,7 @@ worse than the
 original's, since `list_remove` frees the node that the loop then reads.
 AddressSanitizer finds it:
 
+<!-- untested: the report of AddressSanitizer differs from run to run -->
 ```console
 $ typec -g -Wall -Wextra -Werror -fsanitize=address -o sched-asan sched.tc
 $ printf 'add a 1\nadd b 2\nrun 1\n' | ./sched-asan

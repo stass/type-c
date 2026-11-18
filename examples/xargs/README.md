@@ -6,6 +6,12 @@ The excerpts of original/xargs.c, original/strnsubst.c, xargs.tc and
 strnsubst.tc below keep the licenses of those files.
 -->
 
+<!--
+test/run/example_readmes.t checks the console blocks of this file on
+Clang and GCC, but those marked untested: test/run/readme.sh says how
+the blocks are marked.
+-->
+
 # xargs: a FreeBSD utility in Type-C
 
 [`xargs.tc`](xargs.tc) and [`strnsubst.tc`](strnsubst.tc) are FreeBSD's
@@ -568,6 +574,7 @@ is FreeBSD's, and has the first two as well.
 with 0 for "not given", is compared with the line count, and `xflag`,
 which `-x` sets too, is the only guard:
 
+<!-- untested: /usr/bin/xargs is the xargs of the host -->
 ```console
 $ printf 'a b c d e\n' | original/xargs -n 3 -x echo
 a
@@ -595,6 +602,7 @@ d e
 bytes; with `-S 5` the original prints it cut and unsubstituted, and
 with `-S 6` it substitutes:
 
+<!-- untested: /usr/bin/xargs is the xargs of the host -->
 ```console
 $ echo x | original/xargs -I {} -S 5 echo ab{}c
 ab{}
@@ -611,6 +619,7 @@ for the arguments; the 22 bytes of the second argument do not fit after
 the 3 of the first, and move to the start over themselves. The original
 built with AddressSanitizer:
 
+<!-- untested: the report of AddressSanitizer differs from run to run -->
 ```console
 $ cc -g -fsanitize=address -Wno-deprecated-declarations \
     -I original/compat -I original original/xargs.c original/strnsubst.c \

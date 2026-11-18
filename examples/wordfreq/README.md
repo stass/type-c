@@ -3,6 +3,12 @@ SPDX-License-Identifier: BSD-2-Clause
 Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 -->
 
+<!--
+test/run/example_readmes.t checks the console blocks of this file on
+Clang and GCC, but those marked untested: test/run/readme.sh says how
+the blocks are marked.
+-->
+
 # wordfreq: a generic map against khash
 
 `wordfreq` counts the words of its standard input and prints the most
@@ -218,6 +224,8 @@ Give the string table the integer equality by a slip of the name. The
 commands write the copies beside the originals, where `khash.h` and
 `map.tci` are found:
 
+<!-- stage: slips -->
+<!-- run -->
 ```sh
 sed 's/^KHASH_MAP_INIT_STR(word, int)/KHASH_INIT(word, kh_cstr_t, int, 1, kh_str_hash_func, kh_int_hash_equal)/' \
     original/wordfreq.c >original/eqmix.c
@@ -242,6 +250,8 @@ $ printf 'the cat the end the\n' | ./eqmix
 Add the pair that `khash.h` has, `int_hash` and `int_equal`, to the end
 of `map.tci`:
 
+<!-- stage: integer_keys -->
+<!-- edit: map.tci -->
 ```c
 static inline uint32_t
 int_hash(int key)
@@ -258,6 +268,7 @@ int_equal(int a, int b)
 
 and make the same slip:
 
+<!-- run -->
 ```sh
 sed 's/map_new(str, int)(str_hash, str_equal)/map_new(str, int)(str_hash, int_equal)/' \
     wordfreq.tc >eqmix.tc
@@ -277,6 +288,8 @@ eqmix.tc:192: error: a value of type '_Bool (*)(int, int)' does not convert to '
 A slip that both catch is reported in different places. Swap the key
 and value types of the table:
 
+<!-- stage: swapped_types -->
+<!-- run -->
 ```sh
 sed 's/^KHASH_MAP_INIT_STR(word, int)/KHASH_INIT(word, int, kh_cstr_t, 1, kh_str_hash_func, kh_str_hash_equal)/' \
     original/wordfreq.c >original/swap.c
@@ -287,6 +300,7 @@ Clang reports 13 errors in 154 lines, each at the `KHASH_INIT` line and
 traced through the macros of `khash.h`. GCC reports 13 in 200, at lines
 of `khash.h`, none of them in `swap.c`:
 
+<!-- untested: it shows two lines of the report of GCC 16 -->
 ```console
 $ gcc-16 -O2 -Wall -Wextra -Werror -c original/swap.c
 ...

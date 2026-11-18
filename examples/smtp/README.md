@@ -3,6 +3,12 @@ SPDX-License-Identifier: BSD-2-Clause
 Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 -->
 
+<!--
+test/run/example_readmes.t checks the console blocks of this file on
+Clang and GCC, but those marked untested: test/run/readme.sh says how
+the blocks are marked.
+-->
+
 # smtp: an SMTP server's state machine in Type-C
 
 [`original/smtpd.c`](original/smtpd.c) is the server side of a small
@@ -242,6 +248,8 @@ compilers where it must be handled:
  	STATE_MAIL,		/* after MAIL, taking RCPT */
 ```
 
+<!-- stage: auth -->
+<!-- edit: smtpd.tc -->
 ```diff
      | Greeted(struct domain client)	/* after HELO, between messages */
 +    | Auth(struct domain client)	/* after AUTH, reading credentials */
@@ -253,6 +261,7 @@ the program. `-Wall` reports it already, as `-Wswitch`, because the
 `switch` has no `default`; `-Wswitch-enum` would add the `switch`es that
 have one, and this program has none:
 
+<!-- untested: the commands build the original with the state added -->
 ```console
 $ clang -Wall -Wextra -Wswitch-enum -c smtpd.c
 smtpd.c:253:10: warning: enumeration value 'STATE_AUTH' not handled in switch [-Wswitch]
@@ -284,6 +293,10 @@ $ typec -Wall -Wextra -c smtpd.tc
 smtpd.tc:265: error: the match does not cover the constructor 'Auth' of the variant 'state' [match-coverage]
   265 | 	match (s->state) {
 [80]
+```
+
+<!-- untested: the page does not show the arm of Auth in mail -->
+```console
 $ typec -Wall -Wextra -c smtpd.tc       # with Auth in mail's match
 smtpd.tc:457: error: the match does not cover the constructor 'Auth' of the variant 'state' [match-coverage]
   457 | 		match (s->state) {
@@ -323,6 +336,7 @@ AddressSanitizer, where the stack held 0, it runs, and after an RSET it
 sends Carol's message for Dave to Bob as well, the recipient of the
 transaction that RSET ended:
 
+<!-- untested: the commands run the original without the line -->
 ```console
 $ printf 'HELO client.example\r\nMAIL FROM:<alice@client.example>\r\nRCPT TO:<bob@smtpd.example>\r\nRSET\r\nMAIL FROM:<carol@client.example>\r\nRCPT TO:<dave@smtpd.example>\r\nDATA\r\nfor dave only\r\n.\r\nQUIT\r\n' |
     ./smtpd-asan mailbox >/dev/null
@@ -344,6 +358,8 @@ message to Bob, as the original does. What the variant still checks is
 that a `Mail` is given a pointer to a list: leave the pointer out of the
 constructor, and `typec` refuses the program:
 
+<!-- stage: mail_arguments -->
+<!-- edit: smtpd.tc -->
 ```diff
  	case Greeted(client):
  		s->rcpts.nrcpt = 0;
@@ -365,6 +381,7 @@ any state but `Mail`, prints a sender that is stale or was never set.
 The port has no `s->from` to write: the sender is a binding of the arm
 or the test that matched `Mail`, and nowhere else is it in scope:
 
+<!-- untested: the page does not show the line in rset -->
 ```console
 $ typec -Wall -Wextra -c smtpd.tc       # from.text in rset, outside the test
 smtpd.tc:327: error: 'from' is not declared (C11 6.5.1p2)
