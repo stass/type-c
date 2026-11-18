@@ -1300,38 +1300,12 @@ the package, in the order of its commits:
   signed overflow there with a warning (`INT_MAX + 1`). `Declarations`
   follows C11 (6.6p6, p4) and refuses both. If the corpus (0.11) has
   them, decide whether the GNU profile folds them.
-- [Medium] Evidence for P16 (no aggregate layout), for the Stage 0 gate.
-  The places where the declarations need a layout value and leave it to
-  the backend as `Integer_constant.Opaque`: an array length of the size
-  of a structure, union or array (`char b[sizeof (struct s)]`, the
-  `sizeof a / sizeof a[0]` idiom), which gives `Ctype.Opaque`, compatible
-  with every constant length, so typec misses a conflict such as
-  `int a[sizeof (struct s)]; int a[4];`; an enumerator value from a size
-  (`enum { SIZE = sizeof (struct s) }`, a common idiom), which is an
-  error, as it decides the integer type of the enumeration and the types
-  and sizes that follow; a bit-field width from a size, which is an
-  error; a `_Static_assert` on a size, which passes through unchecked;
-  `offsetof`, which GCC and Clang expand to `__builtin_offsetof` (0.7);
-  the length that an initialiser gives an array of unknown size where an
-  array designator is a size (`[sizeof (struct s)] = 1`) or braces are
-  elided into an array of opaque length, which is opaque, and the size of
-  an array that an initialiser completes (`sizeof a` of
-  `int a[] = { 1, 2 }`, `sizeof "abc"`), opaque as every array's is,
-  though its element type and length are known. The target model has no
-  alignments and no size of `_Bool` or of an atomic type, so `_Alignof`
-  of any type and those sizes are opaque too, although they are not
-  aggregates. The counts over the corpus's 3349 units and the three
-  pilots (`/Volumes/Optaine/type-c-corpus`, 7edc282c975e,
-  `measure/p16`), constructs whose constant expression needs a layout
-  value: enumerator 0, bit-field width 0, `_Static_assert` 0, array
-  designator 0, `#if` 0 (impossible), `case` label 1 (`offsetof`, musl);
-  array lengths 127 in 21 files of 5 programs (95 from one musl macro
-  line, 6 typedefs that assert by a negative length) and 1 in Pilot C's
-  FreeRTOS; static initialisers 9, which the backend evaluates. The two
-  refused constructs occur nowhere, and every array length and `case`
-  passes to the backend, which reports the conflicts typec misses. The
-  corpus holds little kernel or protocol code, where enumerators and
-  static assertions of sizes are most common.
+- [Low] The size of an array that an initialiser completes (`sizeof a`
+  of `int a[] = { 1, 2 }`, `sizeof "abc"`) is opaque, as every array's
+  is under P16, though its element type and length are known, so an
+  enumerator or bit-field width of it is refused. Computing an array's
+  size from its element's where the element is a scalar would accept
+  it without computing any aggregate layout.
 - [Low] `external_facts.anchor` is an option only for the state before
   the first external declaration, and `note_text` takes it with
   `Option.get`. Build the facts at the first external declaration, or

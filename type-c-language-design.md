@@ -6135,12 +6135,22 @@ minimum, which only Apple Clang 21 confirms; an Apple release at or
 above the minimum that types C as Clang 20 does would settle it
 otherwise, and without one the minimum stays.
 
-**No aggregate layout.** *Provisional (P16).* The size, alignment and
+**No aggregate layout.** *Decided (P16).* The size, alignment and
 member offsets of struct, union and array types are opaque constants to
 the front end. Expressions that use them are emitted as written and the
 backend evaluates them; `_Static_assert` passes through. Packing pragmas,
 bit-fields and layout attributes make this the part of C that is hardest
-to duplicate, and a silent disagreement would be an ABI bug. A type
+to duplicate, and a silent disagreement would be an ABI bug. The cost
+of the rule falls on two constructs alone, refused because the front end
+must know their value: an enumerator and a bit-field width from a size.
+A count over the corpus's 3349 units and the three pilots found neither,
+while every other use of a size (127 array lengths, a `case` label,
+static initialisers) passes to the backend, which reports any conflict
+that the front end misses, such as `int a[sizeof (struct s)]; int
+a[4];`. A macro, `#define HDR_LEN sizeof (struct hdr)`, takes the place
+of such an enumerator. The corpus holds little kernel or protocol code,
+where the enumerator idiom is most common; computing layout later would
+only accept more programs. A type
 that follows from the value of such a constant is one that the front
 end does not compute, and is unknown (P21): that of a conditional with
 an operand that is a null pointer constant only where the constant is
@@ -8941,7 +8951,7 @@ with the scripts that reproduce them (`make size-split`,
 | P13 | A string literal becomes `str` by target type (8) | A port of the string handling of Pilot B to `str`: 75 literals became `str` by their target type and none needed a cast or a wrapper; 21 stayed `char *` where a C string is meant (19 `printf` formats, `strchr`, `xstrdup`); no reading surprised, and 31 edge probes behave as this section says; the tests pass on Clang and GCC 16 at `-O0` and `-O2` (`measure/p13/2026-11-17-darwin-x86_64/RESULTS.md` in the data repository, commit `e7b60ce`) | **Decided:** as specified |
 | P14 | Slice checks cannot be turned off (8) | Plan, "Measurements of 3.6": the checked and the unchecked sum take 1.24 and 1.29 ms on Clang and 3.55 and 3.56 on GCC 16 at `-O2` for 10^4 elements (1.50 and 1.52, 3.46 and 3.43 for 10^6), the same within noise; at `-O0` 20.0 and 17.4 ms on Clang (+15%) and 21.3 and 17.3 on GCC 16 (+23%), a cost that does not justify an unsafe mode | **Decided:** always on |
 | P15 | The backend preprocesses (13.2) | Stage 4 review of diagnostic quality: line-granular locations served the three pilots, and Pilot C met no diagnostic hard to act on; a column cannot be recovered from the `-E` text cheaply or correctly, and no backend keeps the spacing that would carry one, so a preprocessor of its own would buy columns alone, at the cost of a C preprocessor to keep in step with two compiler families. A diagnostic prints its source line instead (review at `/Volumes/Optaine/diag-review/review.md`, "Columns") | **Decided:** backend preprocesses |
-| P16 | The front end computes no aggregate layout (13.3) | Stage 0 corpus: constructs that need a layout value | No layout |
+| P16 | The front end computes no aggregate layout (13.3) | Stage 0 corpus: constructs that need a layout value. Over 3349 units and the three pilots, the two refused constructs, an enumerator and a bit-field width from a size, occur nowhere; 127 array lengths, a `case` label and 9 static initialisers take a size and pass to the backend (`/Volumes/Optaine/type-c-corpus` at 7edc282c975e, `measure/p16`) | **Decided:** no layout |
 | P17 | The tier 1 rule set (11.2) | Stage 5 prototype on pilot code | Tier 1 is not released until the rules pass |
 | P18 | Lifetimes by homogeneous regions (11.3) | Stage 6: a formal model, then a prototype | No lifetime tier |
 | P19 | `typec` has a C front end of its own (13.1) | Stage 0 gate and its change-of-course condition: the gate passed and the condition did not arise | **Decided:** own front end |
