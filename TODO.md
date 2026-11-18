@@ -48,24 +48,6 @@ jump into or out of a deferred statement. No message cites a design
 section.
 The items are ordered by how often real code meets them.
 
-- [Medium] Conversion hints for a variant. The hint of a refused
-  conversion (`Expressions.record_conversion_hint`) looks only at which
-  side is a structure: `option(point) o = p;` gets no "make one with a
-  constructor", a `result(void, E)` towards `int` is told to use `try`,
-  which has no value there, a pointer to an option is told to make one
-  where `*p` was meant, and `return (NULL);` for an `option(int)` is
-  told to "make one with a constructor of 'option(int)'" where `None`
-  is meant. The full conversion check of Type-C text gives C's own
-  message where a refusal used to carry a hint: `return c ? Some(1) :
-  0;` gets C11 6.5.15p3's operands message, and `return (Ok("x"));` for
-  a `result(int, err)` gets "a value of type 'char *' does not convert
-  to 'int' without a cast (C11 6.5.16.1p1)", naming neither `Ok` nor
-  its field. Proposed: decide the hint by what the variant holds (a
-  constructor whose field the source converts to, an Ok whose type
-  converts to the target, `None` for a null pointer constant), and name
-  the constructor's field as the `[constructor-expression]` messages
-  do: "the argument for the field 'value' of 'Ok' is of type 'char *',
-  not 'int'". Source: review cases 18, 22, 25 and 28; probe.
 - [Medium] A distinct object refused by an atomic builtin
   (`__atomic_fetch_add(&x, 1, 5)` with `id x`) is told "cast to
   'unsigned int'", where the fix casts the pointer, `(unsigned int

@@ -1884,17 +1884,17 @@ let constructors () =
      (design 5); in C text the constructor refuses the structure, as C
      would elide its braces. *)
   rejects ~file (in_function "s w = S(1); return v;")
-    "a value of type 'int' does not convert to 'e'; make one with a \
-     constructor of 'e' (C11 6.5.16.1p1)";
+    "the argument for the field 'v' of 'S' is of type 'int', not 'e'; make \
+     one with a constructor of 'e' [constructor-expression]";
   rejects ~file (in_function "return B(v, 0);")
-    "a value of type 'e' does not convert to 'int'; match it to reach \
-     what it holds (C11 6.5.16.1p1)";
+    "the argument for the field 'i' of 'B' is of type 'e', not 'int'; match \
+     it to reach what it holds [constructor-expression]";
   rejects ~file
     (variant
    ^ "struct p { int x; }; type w = | W(struct p f); w g(void) \
       { return W(1); }")
-    "a value of type 'int' does not convert to 'struct p' (C11 \
-     6.5.16.1p1)";
+    "the argument for the field 'f' of 'W' is of type 'int', not 'struct \
+     p' [constructor-expression]";
   rejects ~file (variant ^ "type t; void g(void) { (void)t.A; }")
     "the variant 't' is incomplete here";
   rejects ~file (variant ^ "typedef int i; int x = i.A;")

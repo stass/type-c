@@ -1403,30 +1403,11 @@ let refuse_type_parameter_conversion context span ~target ~source =
     refuse_type_parameter context span
       "a value converts to or from a type parameter of another type"
 
-(* The step that likely reaches the value that a [source] variant holds:
-   a result is opened by try, any variant by matching (design 5). *)
-let opening_hint source =
-  match (Ctype.as_result source, Ctype.as_variant source) with
-  | Some _, _ -> "; take its value with try, or match it"
-  | None, Some _ -> "; match it to reach what it holds"
-  | None, None -> ""
-
-(* The step that likely makes a [target] variant: a constructor. *)
-let making_hint target =
-  match Ctype.as_variant target with
-  | Some _ ->
-      "; make one with a constructor of " ^ quote (Type_name.of_ctype target)
-  | None -> ""
-
-(* What the user likely meant by converting [source] to [target] where
-   only one of them is a structure or union. Between two of them no step
-   is likely enough to suggest. *)
-let record_conversion_hint ~source ~target =
-  let is_record t = Ctype.is_record t = Answer true in
-  match (is_record source, is_record target) with
-  | true, true | false, false -> ""
-  | true, false -> opening_hint source
-  | false, true -> making_hint target
+(* A cast converts a scalar to a scalar (6.5.4p2), so a refusal between
+   two of them says so. *)
+let cast_hint ~(target : Ctype.t) ~(source : Ctype.t) =
+  let is_scalar t = Ctype.is_scalar t = Answer true in
+  if is_scalar target && is_scalar source then " without a cast" else ""
 
 (* What a refused conversion names: the value converted, by its type or
    as written, and the step that likely makes what was meant. *)
@@ -1435,35 +1416,50 @@ type refused = { subject : string; hint : string }
 let value_of_type (source : Ctype.t) hint =
   { subject = "a value of type " ^ quote (Type_name.of_ctype source); hint }
 
-(* C11 6.5.16.1p1: the [refused] value does not convert to [target] as
-   by assignment. *)
-let refuse_assignment context span ~target { subject; hint } =
-  context.fail span
-    (Rule.c_text
-       (Printf.sprintf "%s does not convert to %s%s (C11 6.5.16.1p1)" subject
-          (quote (Type_name.of_ctype target))
-          hint))
+(* What a value converts to: an object or a parameter, as by assignment,
+   or the field of a constructor that the value is the argument for. *)
+type receiver =
+  | Assigned
+  | Field_argument of { field : string; constructor : string }
 
-(* A cast converts a scalar to a scalar (6.5.4p2), so a refusal between
-   two of them says so. *)
-let cast_hint ~(target : Ctype.t) ~(source : Ctype.t) =
-  let is_scalar t = Ctype.is_scalar t = Answer true in
-  if is_scalar target && is_scalar source then " without a cast" else ""
+(* The argument of type [source] for the field [field] of type [target]
+   of [constructor]. *)
+let field_argument_text ~field ~constructor ~source ~target =
+  Printf.sprintf "the argument for the field %s of %s is of type %s, not %s"
+    (quote field) (quote constructor)
+    (quote (Type_name.of_ctype source))
+    (quote (Type_name.of_ctype target))
+
+(* C11 6.5.16.1p1: the [refused] value, of type [source], does not
+   convert to [target] as by assignment. The argument for a field is
+   named as the argument, whose type the message already sets against
+   the field's, so it needs no word of a cast; a refusal of C otherwise,
+   so it carries no rule's name. *)
+let refuse_assignment context span ~receiver ~target ~source
+    { subject; hint } =
+  match receiver with
+  | Assigned ->
+      context.fail span
+        (Rule.c_text
+           (Printf.sprintf "%s does not convert to %s%s%s (C11 6.5.16.1p1)"
+              subject
+              (quote (Type_name.of_ctype target))
+              (cast_hint ~target ~source) hint))
+  | Field_argument { field; constructor } ->
+      context.fail span
+        (Rule.message Constructor_expression
+           (field_argument_text ~field ~constructor ~source ~target ^ hint))
 
 (* Design 5, C11 6.5.16.1p1: a value of a variant or an instance converts
    to no other type, as a structure does not. The backend would refuse it
    too, naming both types by their C encodings; typec names them as
-   Type-C writes them. A refusal of C, so it carries no rule's name,
-   unless a type argument decides it (design 7.1 rule 4). [named] names
-   the value as written, where it can, once the refusal is certain. *)
-let refuse_record_conversion context span ~target ~source ~named =
+   Type-C writes them, unless a type argument decides it (design 7.1
+   rule 4). [refused] names the value and the likely step, once the
+   refusal is certain. *)
+let refuse_record_conversion context span ~receiver ~target ~source ~refused
+    =
   let refuse () =
-    let refused =
-      match named () with
-      | Some refused -> refused
-      | None -> value_of_type source (record_conversion_hint ~source ~target)
-    in
-    refuse_assignment context span ~target refused
+    refuse_assignment context span ~receiver ~target ~source (refused ())
   in
   if is_type_c_record source || is_type_c_record target then
     match
@@ -4475,8 +4471,8 @@ and assigned context expression ~target typed =
    are the seen ones wherever it applies, as no distinct type is a record
    (design 3.4), so its message names the types as written too. What is
    left is C's own rule, which [refuse_unassignable] applies. *)
-and refuse_conversion context (converted : Tree.expression) target
-    (typed : typed) =
+and refuse_conversion ?(receiver = Assigned) context
+    (converted : Tree.expression) target (typed : typed) =
   let span = converted.span in
   let target = Ctype.unqualified target in
   let source = value_type typed in
@@ -4489,7 +4485,12 @@ and refuse_conversion context (converted : Tree.expression) target
             is_target element || is_const_slice_of context span ~target element)
     | None -> None
   in
-  refuse_record_conversion context span ~target ~source ~named;
+  let refused () =
+    match named () with
+    | Some refused -> refused
+    | None -> value_of_type source (conversion_hint context converted ~source ~target)
+  in
+  refuse_record_conversion context span ~receiver ~target ~source ~refused;
   let crosses =
     match (seen_target.shape, seen_source.shape) with
     | Pointer t, Pointer s -> (
@@ -4513,8 +4514,8 @@ and refuse_conversion context (converted : Tree.expression) target
   refuse_dependent_null context span ~target:seen_target seen_source;
   refuse_type_parameter_conversion context span ~target:seen_target
     ~source:seen_source;
-  refuse_unassignable context converted ~target ~source ~seen_target
-    ~seen_source
+  refuse_unassignable context converted ~receiver ~target ~source
+    ~seen_target ~seen_source
 
 (* Design 5: C11 6.5.16.1p1 in full, in Type-C text and wherever a
    variant or an instance is part of either type. GNU C only warns of
@@ -4522,8 +4523,8 @@ and refuse_conversion context (converted : Tree.expression) target
    or that drops a qualifier, and its messages spell a type that an
    instance writes through a type argument by its encoding; C text that a
    unit includes keeps the rules that the backend applies to it. *)
-and refuse_unassignable context (converted : Tree.expression) ~target ~source
-    ~seen_target ~seen_source =
+and refuse_unassignable context (converted : Tree.expression) ~receiver ~target
+    ~source ~seen_target ~seen_source =
   let checked =
     is_type_c_text context converted.span
     || mentions_type_c_record seen_target
@@ -4533,8 +4534,8 @@ and refuse_unassignable context (converted : Tree.expression) ~target ~source
     assignable context converted ~target:seen_target ~source:seen_source
   in
   if checked && not (converts ()) then
-    refuse_assignment context converted.span ~target
-      (value_of_type source (cast_hint ~target ~source))
+    refuse_assignment context converted.span ~receiver ~target ~source
+      (value_of_type source (conversion_hint context converted ~source ~target))
 
 (* Whether the value of [converted], of type [source], converts to
    [target] as by assignment (C11 6.5.16.1p1). Whether it is a null
@@ -4557,6 +4558,110 @@ and assignable context (converted : Tree.expression) ~(target : Ctype.t)
       | Array _ | Function _ ),
       _ ) ->
       compatible context span target (Ctype.unqualified source) <> Answer false
+
+(* The step that likely gives what was meant where [converted], a value
+   of type [source], does not convert to [target]: making the variant
+   [target] of it, reaching what the variant [source] holds, or a cast
+   between two scalars. *)
+and conversion_hint context converted ~(source : Ctype.t) ~(target : Ctype.t)
+    =
+  match (Ctype.as_variant target, Ctype.as_variant source) with
+  | Some _, None -> making_hint context converted ~source ~target
+  | None, Some _ -> opening_hint context converted ~source ~target
+  | Some _, Some _ -> ""
+  | None, None -> ""
+
+(* The step that likely makes the variant [target] where [converted], of
+   type [source], is written: reading the variant that it points to, the
+   one constructor without fields for a null pointer, or a constructor
+   whose one field takes it. *)
+and making_hint context (converted : Tree.expression) ~source ~target =
+  let constructors = hinted_constructors context target in
+  let name (c : Ctype.constructor) = (c.constructor_name :> string) in
+  if points_to context converted.span ~pointer:source target then
+    Printf.sprintf "; write %s for the value it points to"
+      (quote (scrutinee_text context (Pointed_to converted)))
+  else
+    match
+      ( is_null_pointer context converted source,
+        List.filter (Fun.negate has_fields) constructors,
+        holding_constructor context converted ~source ~target constructors )
+    with
+    | true, [ empty ], _ -> Printf.sprintf "; write %s for no value" (quote (name empty))
+    | _, _, Some holder ->
+        Printf.sprintf "; make one with %s"
+          (quote (name holder ^ "(" ^ excerpt context converted.span ^ ")"))
+    | _, _, None ->
+        "; make one with a constructor of " ^ quote (Type_name.of_ctype target)
+
+(* The constructors of the variant [t] that a hint names; an instance
+   named only in a prototype is completed first, as a constructor
+   written there would complete it. *)
+and hinted_constructors context t =
+  context.needs_complete t;
+  Option.value (Ctype.constructors context.tags t) ~default:[]
+
+(* Whether [pointer] points to a type compatible with [target]. *)
+and points_to context span ~(pointer : Ctype.t) target =
+  match (Ctype.unqualified pointer).shape with
+  | Pointer referenced ->
+      compatible context span (Ctype.unqualified referenced) target
+      = Answer true
+  | Void | Arithmetic _ | Enum _ | Record _ | Distinct _ | Va_list | Array _
+  | Function _ | Unknown_type _ ->
+      false
+
+(* Whether [converted], of type [source], is a null pointer constant of
+   pointer type, which says "no value", as an integer 0 need not. *)
+and is_null_pointer context converted (source : Ctype.t) =
+  is_plain_void_pointer (Ctype.unqualified source)
+  && null_pointer_constant context converted = Null
+
+(* The constructor of the variant [target] whose one field a value of
+   type [source] converts to: the one whose field is of that very type,
+   or else the only one that takes it, or else a result's Ok, which
+   holds the value that try reads. *)
+and holding_constructor context converted ~source ~target constructors =
+  let field_type (c : Ctype.constructor) =
+    match c.fields with
+    | [ field ] -> Some (Ctype.unqualified field.member_type)
+    | _ -> None
+  in
+  let takes c =
+    match field_type c with
+    | Some field -> assignable context converted ~target:field ~source
+    | None -> false
+  in
+  let same c =
+    match field_type c with
+    | Some field ->
+        compatible context converted.span field (Ctype.unqualified source)
+        = Answer true
+    | None -> false
+  in
+  let takers = List.filter takes constructors in
+  match (List.filter same takers, takers) with
+  | [ chosen ], _ | [], [ chosen ] -> Some chosen
+  | _ when Ctype.as_result target <> None ->
+      List.find_opt (is_named Ctype.result_ok) takers
+  | _ -> None
+
+(* The step that likely reaches what the variant [source] holds: try,
+   where it is a result whose Ok holds a value that converts to
+   [target], or else matching. *)
+and opening_hint context converted ~source ~target =
+  let ok_converts (c : Ctype.constructor) =
+    match c.fields with
+    | [ field ] ->
+        is_named Ctype.result_ok c
+        && assignable context converted ~target
+             ~source:(Ctype.unqualified field.member_type)
+    | _ -> false
+  in
+  let constructors = hinted_constructors context source in
+  if Ctype.as_result source <> None && List.exists ok_converts constructors
+  then "; take its value with try, or match it"
+  else "; match it to reach what it holds"
 
 (* [typed], the value of [expression] in a braced initialiser, made a
    slice where [target] is one (design section 8 rule 5); the
@@ -4869,23 +4974,25 @@ and called_name (whole : Tree.expression) =
    are the backend's (design 5). *)
 and constructor_argument context named (field : Ctype.member) argument =
   let field_type = field.member_type in
-  let argument_type =
-    value_type (positioned context (Targeted field_type) argument)
+  let typed = positioned context (Listed field_type) argument in
+  let receiver =
+    Field_argument
+      {
+        field = Option.value field.member_name ~default:"";
+        constructor = (named.chosen.constructor_name :> string);
+      }
   in
+  refuse_conversion ~receiver context argument field_type typed;
+  let argument_type = value_type typed in
   initialises_whole context field_type argument;
   let is_record t = Ctype.is_record t = Answer true in
   if is_record field_type || is_record argument_type then
     match compatible context argument.span field_type argument_type with
     | Answer true | Depends_on _ -> ()
     | Answer false ->
-        context.fail argument.span
-          (constructor_message
-             (Printf.sprintf
-                "the argument for the field %s of %s is of type %s, not %s"
-                (quote (Option.value field.member_name ~default:""))
-                (quote (named.chosen.constructor_name :> string))
-                (quote (Type_name.of_ctype argument_type))
-                (quote (Type_name.of_ctype field_type))))
+        refuse_assignment context argument.span ~receiver ~target:field_type
+          ~source:argument_type
+          (value_of_type argument_type "")
 
 (* The arguments of a call of a builtin that moves a value of the object
    that its first argument points to have the target types that the
@@ -5294,7 +5401,7 @@ and conditional context span position condition if_true if_false =
   operands_meet context
     (second.branch, value_type second.branch_typed)
     (third.branch, value_type third.branch_typed);
-  let result = conditional_type context span second third in
+  let result = conditional_type context span position second third in
   discard_branches context position
     ~need:
       "the type of a discarded conditional with a branch of a result type"
@@ -5314,8 +5421,9 @@ and meet_slices context second third =
   in
   (towards second third, towards third second)
 
-(* 6.5.15p3 to p6: the type of a conditional of these branches. *)
-and conditional_type context span second third =
+(* 6.5.15p3 to p6: the type of a conditional of these branches, which
+   stands in [position]. *)
+and conditional_type context span position second third =
   refuse_type_parameter_branch context span second.branch_typed;
   refuse_type_parameter_branch context span third.branch_typed;
   let branch_operand branch =
@@ -5352,7 +5460,20 @@ and conditional_type context span second third =
     when Ctype.is_void b = Answer true ->
       Ctype.void
   | (Arithmetic_operand _ | Pointer_operand _ | Other_operand _), _ ->
+      refuse_unconverted_branch context position [ second; third ];
       fail_operands context span "6.5.15p3"
+
+(* Branches that have no type in common: where the conditional has a
+   target type, one that does not convert to it is the likely mistake,
+   as in 'c ? Some(1) : 0', so its conversion is refused first. *)
+and refuse_unconverted_branch context position branches =
+  match position with
+  | Targeted target | Listed target ->
+      List.iter
+        (fun { branch; branch_typed } ->
+          refuse_conversion context branch target branch_typed)
+        branches
+  | Untargeted | Discarded | Discarded_branch -> ()
 
 (* 6.5.15p6: a null pointer constant takes the other operand's type, a
    pointer to void makes the result one. Whether an operand of a value

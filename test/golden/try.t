@@ -2238,7 +2238,7 @@ likely step, before the backend would name their C encodings.
   [1]
   $ { cat conversions.h; printf 'result(int, error) b(void) { return 0; }\n'; } > returned.tc
   $ ./golden.exe returned.tc
-  returned.tc:7: error: a value of type 'int' does not convert to 'result(int, error)'; make one with a constructor of 'result(int, error)' (C11 6.5.16.1p1)
+  returned.tc:7: error: a value of type 'int' does not convert to 'result(int, error)'; make one with 'Ok(0)' (C11 6.5.16.1p1)
   [1]
   $ { cat conversions.h; printf 'void c(void) { take(f()); }\n'; } > passed.tc
   $ ./golden.exe passed.tc
@@ -2250,7 +2250,7 @@ likely step, before the backend would name their C encodings.
   [1]
   $ { cat conversions.h; printf 'void e(void) { take_option(3); }\n'; } > argument.tc
   $ ./golden.exe argument.tc
-  argument.tc:7: error: a value of type 'int' does not convert to 'option(int)'; make one with a constructor of 'option(int)' (C11 6.5.16.1p1)
+  argument.tc:7: error: a value of type 'int' does not convert to 'option(int)'; make one with 'Some(3)' (C11 6.5.16.1p1)
   [1]
   $ { cat conversions.h; printf 'void h(void) { int a[2] = { g(), 1 }; (void)a; }\n'; } > listed.tc
   $ ./golden.exe listed.tc
@@ -2262,11 +2262,35 @@ likely step, before the backend would name their C encodings.
   [1]
   $ { cat conversions.h; printf 'option(int) j(void) { return Some(f()); }\n'; } > constructed.tc
   $ ./golden.exe constructed.tc
-  constructed.tc:7: error: a value of type 'result(int, error)' does not convert to 'int'; take its value with try, or match it (C11 6.5.16.1p1)
+  constructed.tc:7: error: the argument for the field 'value' of 'Some' is of type 'result(int, error)', not 'int'; take its value with try, or match it [constructor-expression]
   [1]
   $ { cat conversions.h; printf 'option(int) k(int c) { return c ? Some(1) : 0; }\n'; } > branch.tc
   $ ./golden.exe branch.tc
-  branch.tc:7: error: the operands have types that the operator does not take (C11 6.5.15p3)
+  branch.tc:7: error: a value of type 'int' does not convert to 'option(int)'; make one with 'Some(0)' (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'void l(holder(int) h) { option(holder(int)) o = h; (void)o; }\n'; } > held.tc
+  $ ./golden.exe held.tc
+  held.tc:7: error: a value of type 'holder(int)' does not convert to 'option(holder(int))'; make one with 'Some(h)' (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'result(void, error) v(void);\nint m(void) { return v(); }\n'; } > void_result.tc
+  $ ./golden.exe void_result.tc
+  void_result.tc:8: error: a value of type 'result(void, error)' does not convert to 'int'; match it to reach what it holds (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'void n(option(int) *p) { option(int) o = p; (void)o; }\n'; } > pointed.tc
+  $ ./golden.exe pointed.tc
+  pointed.tc:7: error: a value of type 'option(int) *' does not convert to 'option(int)'; write '*p' for the value it points to (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'option(int) q(void) { return ((void *)0); }\n'; } > null.tc
+  $ ./golden.exe null.tc
+  null.tc:7: error: a value of type 'void *' does not convert to 'option(int)'; write 'None' for no value (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'result(int, error) r(void) { return (Ok("x")); }\n'; } > field.tc
+  $ ./golden.exe field.tc
+  field.tc:7: error: the argument for the field 'value' of 'Ok' is of type 'char *', not 'int' [constructor-expression]
+  [1]
+  $ { cat conversions.h; printf 'type num = | I(int i) | D(double d);\nnum s(void) { return 1.5; }\n'; } > chosen.tc
+  $ ./golden.exe chosen.tc
+  chosen.tc:8: error: a value of type 'double' does not convert to 'num'; make one with 'D(1.5)' (C11 6.5.16.1p1)
   [1]
 
 The partners convert nothing: try and constructors take the steps, a
