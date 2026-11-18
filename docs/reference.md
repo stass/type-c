@@ -1402,8 +1402,302 @@ forged.tc:6: error: the variant 'answer' is private to 'include/ticket.tci', so 
 
 ## 10. C clients and headers
 
-What C code sees of each Type-C type, and the headers of
-`typec --emit-c-header`: design 9.3 and section 10.
+### 10.1 What C code sees
+
+A *C client* is C code that uses the types and functions of Type-C
+units. Each Type-C type is a C type to it:
+
+| Type-C | C |
+| --- | --- |
+| Variant `name` | `struct name` and the typedef `name`, with its tag and union ([2.2](#22-variants)) |
+| Distinct type | Its underlying type: `type port = distinct unsigned short;` is `typedef unsigned short port;` |
+| Application of a type of its own | A structure, union or typedef under the instance name, as `struct vector__i` ([2.5](#25-generic-types)) |
+| Any other application | A typedef under the instance name of the type that it stands for, as `ptr__i` for `int *` |
+| `option`, `result` | Variants under the instance name, as `option__i` for `option(int)` |
+| `slice`, `str` | `{ T *data; size_t len; }` under the instance name; `str` is `slice__Kc` ([8](#8-slices-and-str)) |
+| Non-generic function | The same function |
+| Generic function | Nothing; wrap an instance ([7.3](#73-instances)) |
+
+1. An instance of a variant is the variant of [2.2](#22-variants) with
+   the instance name as `name`: `option(int)` is `struct option__i`,
+   with the tag type `enum option__i_tag` and the enumerators
+   `option__i_None` and `option__i_Some`.
+2. The enumeration of the tags ends with a hidden enumerator, so a
+   `switch` on the tag that names every constructor draws `-Wswitch`
+   from `-Wall` unless it has a `default:`, which a tag that is no
+   constructor's needs anyway.
+3. A C client reads and writes everything that it sees, and no rule of
+   Type-C binds it ([9.2](#92-private) rule 5). A tag that it writes
+   and that is no constructor's traps when a `match`, a test or a `try`
+   of Type-C code reads it ([3.6](#36-invalid-tags)).
+
+### 10.2 Headers
+
+`typec --emit-c-header M.tci` writes `M.h`, the C header of the
+interface `M.tci`, and compiles nothing. [typec(1)](typec.1) states its
+command line: where the header goes, that it replaces no file but a
+header that it wrote, and the dependency options, which work as for
+a `.tc` input ([13](#13-the-driver) rule 2) with the header as the
+target of the rule.
+
+1. A Type-C unit that includes `M.h` reads `M.tci` itself, since
+   `__TYPEC__` is defined there; a C client reads the lowered text. A
+   C header shared by both kinds of unit therefore names an instance
+   through a typedef that `M.tci` declares, as
+   `typedef pair(int, int) int_pair;`: the instance name `pair__ii` is
+   claimed by its generic in a Type-C unit ([2.5](#25-generic-types)).
+2. The header holds the C of the declarations of `M.tci`, as variants,
+   distinct types, prototypes and the lowered bodies of inline
+   functions, with its `#include` lines in place, where a name that
+   ends in `.tci` ends in `.h`. It holds no generic declaration and no
+   macro of `M.tci`: `M.tci` is preprocessed, with `__TYPEC__` defined,
+   under the options of the command, so a macro that a C client needs
+   is defined in a plain `.h` that `M.tci` includes. It holds no line
+   marker, so a client's diagnostics name lines of the header.
+3. The header has an include guard named for the last component of the
+   path of `M.tci`, as `__tc_module__stats` for `stats.tci`, and may be
+   included more than once.
+4. Every instance that the declarations of `M.tci` name is declared,
+   with the typedefs of its arguments, and is defined where a
+   declaration needs it complete, as in a Type-C unit, or else at the
+   end of the header where everything that its definition needs
+   complete is complete there. Each definition has an include guard of its own,
+   named for the instance, as `__tc_instance__vec__i`. Two headers that
+   name one instance are thus included together in either order, and
+   the first that can define it defines it.
+5. The header declares no `option`, `result`, `slice` or `str`, which a
+   C client may declare for itself; it names their instances, as
+   `slice__Kc`, as it names any instance.
+6. For each instance that it applies, the header writes a *layout
+   typedef*, named for the instance, as `__tc_layout__vec__i`. Its type
+   is a pointer to a structure whose tag holds a digest of the
+   definitions of the instance's generic and of the generics that it
+   applies. Two headers whose definitions of the instance are one text
+   write one typedef, which C lets a client repeat. Two whose
+   definitions differ write typedefs of different types, and the
+   client's compiler refuses the second, whichever header defines the
+   instance. The digest compares tokens: white space and comments do
+   not count, but two definitions that differ only in a name that
+   changes no layout, as that of a type parameter, are refused
+   together all the same.
+7. After its instances, the header has the *enumeration assertion*, a
+   static assertion
+   that enumerations have the representation of the configuration that
+   wrote it. A client compiled with the other, as under `-fshort-enums`
+   against a header written without it, fails to compile with a message
+   that names the representation and the option.
+8. The macros of the client do not reach the lowered text. Each run of
+   it between two include lines stands between `#pragma push_macro`
+   and `#undef` of every identifier that the run holds, keywords
+   included, and `#pragma pop_macro` of each after it. A client's
+   `#define count 0` then changes no field of the header, and the
+   client keeps the macro after the header. The header begins with a
+   probe of the two pragmas, and a compiler that does not restore a
+   macro fails with "this header needs #pragma push_macro and
+   pop_macro".
+9. The header keeps a client's `#pragma pack` from the text of its
+   instances, as a Type-C unit does, and from nothing else in it
+   ([10.3](#103-limits) rule 3). A header that names an instance ends
+   with a probe that fails on a compiler that reads `#pragma pack()`
+   otherwise than `typec` assumes.
+10. Under `--trap-function=name`, the lowered inline functions of the
+    header call a `static inline` function `__tc_trap`, which the
+    header defines to call `name` and then trap
+    ([11](#11-checks-and-the-trap)), under an include guard named for
+    `name`, as `__tc_trap__stop`. The client's program supplies `name`.
+    Two headers of one trap function share the definition; two of
+    different trap functions define `__tc_trap` twice, which the
+    client's compiler refuses.
+11. The header is C11, and a client compiles it as C11 or later.
+
+An interface with a variant and an instance of a generic:
+
+<!-- file: stats.tci -->
+```c
+#ifndef STATS_TCI
+#define STATS_TCI
+
+#include <stddef.h>
+
+type vec(T) = struct { T *data; size_t len; };
+type summary =
+    | Empty
+    | Total(long sum, size_t count);
+
+summary summarize(vec(int) values);
+summary merge(summary a, summary b);
+
+#endif
+```
+
+Its implementation:
+
+<!-- file: stats.tc -->
+```c
+#include "stats.tci"
+
+summary
+summarize(vec(int) values)
+{
+	long sum = 0;
+
+	if (values.len == 0)
+		return (Empty);
+	for (size_t i = 0; i < values.len; i++)
+		sum += values.data[i];
+	return (Total(sum, values.len));
+}
+
+summary
+merge(summary a, summary b)
+{
+	match (a) {
+	case Empty:
+		return (b);
+	case Total(sum, count):
+		match (b) {
+		case Empty:
+			return (a);
+		case Total(sum2, count2):
+			return (Total(sum + sum2, count + count2));
+		}
+	}
+}
+```
+
+A C client, which builds a `vec(int)` and a `summary` and reads the
+`summary` that it gets back:
+
+<!-- file: tally.c -->
+```c
+#include <stdio.h>
+#include "stats.h"
+
+int
+main(void)
+{
+	int values[] = { 3, 4, 5 };
+	vec__i v = { values, 3 };
+	summary earlier = { .tag = summary_Total, .u.Total = { 10, 2 } };
+	summary s = merge(summarize(v), earlier);
+
+	switch (s.tag) {
+	case summary_Empty:
+		printf("empty\n");
+		break;
+	case summary_Total:
+		printf("%ld over %zu\n", s.u.Total.sum, s.u.Total.count);
+		break;
+	default:
+		return (1);
+	}
+	return (0);
+}
+```
+
+```console
+$ typec --emit-c-header stats.tci
+$ typec -Wall -Wextra -Werror -c stats.tc
+$ cc -std=c11 -pedantic-errors -Wall -Wextra -Werror -c tally.c
+$ cc -o tally tally.o stats.o
+$ ./tally
+22 over 5
+$ grep -e '^#ifndef' stats.h
+#ifndef __tc_module__stats
+#ifndef __tc_macro_probe__stats
+#ifndef __tc_instance__vec__i
+$ cc -std=c11 -fshort-enums -c tally.c 2>&1 | grep -o -m 1 'typec assumes[^"]*'
+typec assumes int-sized enumerations: an enumeration of small nonnegative values is compatible with unsigned int (-fshort-enums?)
+```
+
+Another library's interface, which defines a `vec` of its own with the
+fields in another order, and a client that includes both headers:
+
+<!-- file: ring.tci -->
+```c
+#ifndef RING_TCI
+#define RING_TCI
+
+#include <stddef.h>
+
+type vec(T) = struct { size_t len; T *data; };
+
+int ring_first(vec(int) ring);
+
+#endif
+```
+
+<!-- file: both.c -->
+```c
+#include "stats.h"
+#include "ring.h"
+```
+
+```console
+$ typec --emit-c-header ring.tci
+$ cc -std=c11 -c both.c 2> /dev/null
+[1]
+```
+
+The error is at the layout typedef of `vec(int)` in `ring.h`:
+
+<!-- console: clang -->
+```console
+$ cc -std=c11 -c both.c 2>&1 | grep -o "error: [^;(]*[^;( ]"
+error: typedef redefinition with different types
+```
+
+<!-- console: gcc -->
+```console
+$ cc -std=c11 -c both.c 2>&1 | grep -o "error: [^;(]*[^;( ]"
+error: conflicting types for '__tc_layout__vec__i'
+```
+
+### 10.3 Limits
+
+1. The headers that one client includes are written by one release of
+   `typec`: two releases may lower one definition otherwise and give
+   both one digest, and the client's compiler then takes both with no
+   message.
+2. They are written with one backend and one set of macros for the
+   generics that they share. The digest is of the preprocessed text, so
+   one generic preprocessed by two backends, or under different
+   macros, has two digests, and the client is refused.
+3. A header is specific to the target and configuration that wrote it.
+   A client compiles it with the same options that change a layout,
+   outside the region of every `#pragma pack` and of every other pragma
+   that changes one, and without the options that `typec` refuses
+   ([typec(1)](typec.1)). Of these, the client's compile checks only
+   the enumeration representation and the reading of `#pragma pack()`
+   ([10.2](#102-headers) rules 7 and 9).
+4. The header is written under the options of the Type-C units, `-D`
+   included, since the conditionals of `M.tci` are decided then. A C
+   client reads each header that the header includes without
+   `__TYPEC__` and without the macros that `M.tci` defines before it:
+   a plain `.h` that adapts under `__TYPEC__` gives both branches one
+   layout, and a macro that changes what a system header declares, as
+   `_FILE_OFFSET_BITS`, is given on the command line of every compile.
+   Nothing checks either.
+5. A macro whose value is computed where it is expanded, as `__FILE__`
+   in an `assert` of an inline function, holds the value of the
+   header's compile, a path of the machine that wrote it included;
+   `-fmacro-prefix-map` rewrites that path.
+6. A C client defines no name that begins with `__tc_`. Such names are
+   reserved to C (C11 7.1.3), and the header's guards, typedefs and
+   enumerators are among them.
+7. Two interfaces whose paths end in the same component have one guard,
+   so a client that includes both headers gets the first alone, with
+   no message, and meets the names of the second as undeclared or as
+   what the first declares under them.
+8. An instance whose generic the header sees only declared, as
+   `type list(T);`, or whose generic applies one that it sees only
+   declared, has no layout typedef, and a different definition in
+   another header goes unseen.
+9. A client compiles the header only where each `.tci` that `M.tci`
+   includes has its header too, at the same path relative to it.
+10. A build that preprocesses a client under GCC's `-fdirectives-only`
+    and compiles that output apart drops `push_macro` and `pop_macro`,
+    and the macro probe fails it.
 
 ## 11. Checks and the trap
 

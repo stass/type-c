@@ -1740,9 +1740,8 @@ types (design 13.3).
 
 ## Language reference
 
-- [Medium] Write sections 10 (C clients and headers, once
-  `--emit-c-header` is complete) and 12 (checked mode) of
-  `docs/reference.md`, which point to the design instead.
+- [Medium] Write section 12 (checked mode) of `docs/reference.md`,
+  which points to the design instead.
 - [Low] The README states `typec`'s exit statuses in five sections
   ("Choosing the backend", "Compiling a `.tc` input", "Printing the
   target model", "Printing the version", "What typec reports"), copies
