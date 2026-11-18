@@ -7,15 +7,22 @@
 # is older, and OCaml and dune from opam, since Debian 13's OCaml 5.3
 # lacks the Char.Ascii of 5.4 that tools/fuzz uses. The Clang comes with
 # its sanitizer runtimes, as the tests of test/run link with
-# -fsanitize. The base image is pinned by the digest of its
-# multi-platform index; the compilers, the C library's and the kernel's
-# headers, file (the own suite of the corpus's chibicc runs it), and
-# ninja and CMake (the tests of the build rules run them), by package
-# version, the same on both platforms; the key of apt.llvm.org by
-# fingerprint; OCaml and dune by a commit of opam-repository. Their own
-# dependencies follow Debian 13, Clang's apt.llvm.org, and GCC 16's the
-# snapshot of Debian testing below. A pinned version that leaves the
-# archive fails the build until it is bumped here.
+# -fsanitize. Besides the compilers the image has the C library's and
+# the kernel's headers, file (the own suite of the corpus's chibicc runs
+# it), and ninja and CMake (the tests of the build rules run them).
+#
+# The base image is pinned by the digest of its multi-platform index;
+# every Debian package, with its dependencies, by one timestamp of
+# snapshot.debian.org (SNAPSHOT below), which apt reads instead of the
+# live archive, so that a package that the archive has since replaced
+# still installs; Clang by package version and the key of apt.llvm.org
+# by fingerprint; OCaml and dune by a commit of opam-repository. A
+# package version is not pinned by name, as it can differ between the
+# platforms: a binNMU rebuilds a package for one architecture under a
+# new version (ninja-build is 1.12.1-1 on amd64 and 1.12.1-1+b1 on
+# arm64). A snapshot's Release file expires a week after its date,
+# hence Check-Valid-Until no; its signature is still checked against
+# the archive key, which is what makes plain HTTP safe here.
 #
 # Debian 13 stops at GCC 14, so GCC 16 comes from Debian testing (forky),
 # from which apt takes gcc-16 and the newer runtime libraries of GCC that
@@ -26,34 +33,46 @@
 
 FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 
-RUN apt-get update \
+ARG SNAPSHOT=20261110T000000Z
+
+RUN printf '%s\n' \
+      'Types: deb' \
+      "URIs: http://snapshot.debian.org/archive/debian/$SNAPSHOT/" \
+      'Suites: trixie trixie-updates' \
+      'Components: main' \
+      'Check-Valid-Until: no' \
+      'Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp' \
+      '' \
+      'Types: deb' \
+      "URIs: http://snapshot.debian.org/archive/debian-security/$SNAPSHOT/" \
+      'Suites: trixie-security' \
+      'Components: main' \
+      'Check-Valid-Until: no' \
+      'Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp' \
+      > /etc/apt/sources.list.d/debian.sources \
+ && apt-get update \
  && apt-get install -y --no-install-recommends \
-      gcc=4:14.2.0-1 gcc-14=14.2.0-19 \
-      libc6-dev=2.41-12+deb13u4 linux-libc-dev=6.12.117-1 \
-      file=1:5.46-5 ninja-build=1.12.1-1 cmake=3.31.6-2 \
-      csmith=2.3.0-8 libcsmith-dev=2.3.0-8 m4=1.4.19-8 \
-      opam=2.3.0-1+deb13u2 \
+      gcc gcc-14 libc6-dev linux-libc-dev file ninja-build cmake \
+      csmith libcsmith-dev m4 opam \
       ca-certificates curl gpg git make patch unzip bzip2 \
  && rm -rf /var/lib/apt/lists/*
 
-# GCC 16 from Debian testing, as snapshot.debian.org had it at the
-# timestamp below, since testing itself keeps one version of a package
-# and drops the pinned one at its next upload. A snapshot's Release file
-# expires a week after its date, hence check-valid-until=no; its
-# signature is still checked against the archive key. The timestamp and
-# the gcc-16 version change together. The C library stays on hold, so
-# that a gcc-16 that needs a newer one fails the build instead of moving
-# the host to testing's glibc. The source list is removed again, so that
-# no later install takes anything from it.
-RUN echo "deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg" \
-      "check-valid-until=no]" \
-      https://snapshot.debian.org/archive/debian/20261110T000000Z/ \
-      forky main \
-      > /etc/apt/sources.list.d/forky.list \
+# GCC 16 from Debian testing at the same timestamp. The C library stays
+# on hold, so that a gcc-16 that needs a newer one fails the build
+# instead of moving the host to testing's glibc. The source is removed
+# again, so that no later install takes anything from it.
+RUN printf '%s\n' \
+      'Types: deb' \
+      "URIs: http://snapshot.debian.org/archive/debian/$SNAPSHOT/" \
+      'Suites: forky' \
+      'Components: main' \
+      'Check-Valid-Until: no' \
+      'Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp' \
+      > /etc/apt/sources.list.d/forky.sources \
  && apt-mark hold libc6 libc6-dev linux-libc-dev \
  && apt-get update \
- && apt-get install -y --no-install-recommends -t forky gcc-16=16.2.0-4 \
- && rm /etc/apt/sources.list.d/forky.list \
+ && apt-get install -y --no-install-recommends -t forky gcc-16 \
+ && rm /etc/apt/sources.list.d/forky.sources \
  && rm -rf /var/lib/apt/lists/*
 
 # apt checks the repository against the key, and the key is the one
