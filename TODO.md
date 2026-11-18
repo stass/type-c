@@ -101,18 +101,21 @@ The items are ordered by how often real code meets them.
   `Ctype.result_ok` and `result_err` spell two of its names a third time
   (`test_naming` pins the three together). Source: review cases 31 and
   32 (Pilot B); probe.
+- [Low] A binding written with a C type, `Circle(double r)`, is refused
+  by the parser, which does not know the field's type, so its fix names
+  both forms ("write `r` ... (at a field of a variant type, a typedef
+  name may stand before the name)"), and a typed binding of a typedef
+  name at a field of no variant is refused by typing under
+  [match-pattern]: one rule, two refusals. Recording a typed binding
+  with a full type name and letting typing refuse it would give the one
+  fix that the field takes. `Ok(int (*f)(void))` gets "expected `)`
+  after a declarator, found `f`". Source: review.
 - [Low] The test that a refusal of a variant suggests is always 'if
   (case P = e)': for `while (next())` the drop-in form is `while (case
   Ok(value) = next())`, and a `for` or `do` condition can hold no test,
   so the fix there is a loop around a test; `require_condition` could
   take the statement. The scrutinee of `->` is parenthesised after `*`
   unless it is a name, so `(p)->j` reads `*((p))`.
-- [Low] A typed binding of a field that is no variant: `case
-  Circle(double r)`, written as C declares, gives "expected a
-  sub-pattern, found `double`". Proposed: "a field of type 'double' is
-  bound by its name alone, 'Circle(r)'; a type stands before a binding
-  only at a field of a variant type". Source: probe (the tutorial's
-  `Setting(Port, value v)` shows the typed form).
 - [Low] A binding that its arm never uses fails a `-Werror` build with
   the backend's `-Wunused-variable`, which quotes the lowered text,
   `const __typeof__(__tc_match0->u.Circle.r) r = ...`. Proposed: the

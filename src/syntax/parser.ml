@@ -4887,6 +4887,7 @@ and sub_pattern_words state =
     if accept state P.Star then
       Followed_words (pattern_words ~expected:"a constructor after `*`" state)
     else if begins_typed_binding state then typed_binding_words state
+    else if begins_declared_binding state then refuse_declared_binding state
     else Pattern_words (pattern_words ~expected:"a sub-pattern" state)
   in
   (span_from state start, node)
@@ -4897,6 +4898,42 @@ and begins_typed_binding state =
   | Identifier_token _, Punctuator_token P.Left_paren ->
       is_identifier (peek_at state (past_group state P.Left_paren 1))
   | _ -> false
+
+(* No sub-pattern begins with a keyword, so one that begins a type name
+   begins a binding written as C declares one, [double r]. *)
+and begins_declared_binding state =
+  match peek state with
+  | Keyword_token _ -> starts_type_name state 0
+  | Identifier_token _ | Punctuator_token _ | Number_token | Character_token _
+  | String_token _ | End_of_input ->
+      false
+
+(* A pattern binds a field by its name alone, and only a field of a
+   variant type takes a typedef name before it (design 4.7 rule 4); the
+   parser does not know which field this is, so the fix names both. *)
+and refuse_declared_binding state =
+  let start = first_token state state.position in
+  ignore (type_name state : type_name);
+  let declared () =
+    Reader.excerpt state.reader ~first:start ~last:(last_read state)
+  in
+  let refusal =
+    match peek state with
+    | Identifier_token name ->
+        advance state;
+        Printf.sprintf
+          "a pattern binds a field by its name alone, not as C declares \
+           it; write %s, not %s (at a field of a variant type, a typedef \
+           name may stand before the name)"
+          (quoted name) (quoted (declared ()))
+    | Keyword_token _ | Punctuator_token _ | Number_token | Character_token _
+    | String_token _ | End_of_input ->
+        Printf.sprintf
+          "a sub-pattern may not be the type %s; write the name of a \
+           binding, `_` or a constructor pattern"
+          (quoted (declared ()))
+  in
+  fail_at_token state start (Rule.c_text refusal)
 
 (* [T x], where [T] is a typedef name or the application of a generic
    type. *)

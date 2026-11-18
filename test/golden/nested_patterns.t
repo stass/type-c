@@ -211,6 +211,27 @@ a constructor at an integer.
   integer.tc:7: error: the sub-pattern 'DivByZero(x)' stands at a field of type 'int', which takes `_` or a binding [match-pattern]
   [1]
 
+A binding written as C declares one, with its type, is refused with the
+binding as a pattern writes it; only a field of a variant type takes a
+type before its binding.
+
+  $ sed 's/Err(\*DivByZero)/Ok(int value)/' star.tc > declared.tc
+  $ ./golden.exe declared.tc
+  declared.tc:7: error: a pattern binds a field by its name alone, not as C declares it; write `value`, not `int value` (at a field of a variant type, a typedef name may stand before the name)
+  [1]
+  $ sed 's/Err(\*DivByZero)/Ok(const unsigned *value)/' star.tc > declared_pointer.tc
+  $ ./golden.exe declared_pointer.tc
+  declared_pointer.tc:7: error: a pattern binds a field by its name alone, not as C declares it; write `value`, not `const unsigned *value` (at a field of a variant type, a typedef name may stand before the name)
+  [1]
+  $ sed 's/Err(\*DivByZero)/Ok(double)/' star.tc > declared_type.tc
+  $ ./golden.exe declared_type.tc
+  declared_type.tc:7: error: a sub-pattern may not be the type `double`; write the name of a binding, `_` or a constructor pattern
+  [1]
+  $ sed 's/Err(\*DivByZero)/Ok(eval_error value)/' star.tc > typed_integer.tc
+  $ ./golden.exe typed_integer.tc
+  typed_integer.tc:7: error: the sub-pattern 'eval_error value' stands at a field of type 'int', which is bound by its name alone; write 'value' [match-pattern]
+  [1]
+
 The values that no label takes are named as patterns; a constructor
 added to the variant of a field is named under its holder; a default
 takes them (4.2 rule 1, 4.7 rule 6).

@@ -6399,19 +6399,23 @@ and refuse_other_type context (type_name : Tree.type_name)
 (* 4.7 rule 2: a sub-pattern that the type of its position does not
    list. *)
 and refuse_sub_pattern context (sub : Tree.sub_pattern) t position_type =
-  let takes =
-    match position_type with
-    | Variant_position _ -> "`_`, a constructor pattern or a typed binding"
-    | Pointer_position _ -> "`_`, a binding or `*` and a constructor pattern"
-    | Other_position -> "`_` or a binding"
+  let what_stands_there =
+    match (sub.node, position_type) with
+    | _, Variant_position _ ->
+        "takes `_`, a constructor pattern or a typed binding"
+    | Typed_binding { name; _ }, (Pointer_position _ | Other_position) ->
+        "is bound by its name alone; write " ^ quote name.node
+    | _, Pointer_position _ ->
+        "takes `_`, a binding or `*` and a constructor pattern"
+    | _, Other_position -> "takes `_` or a binding"
   in
   context.fail sub.span
     (Rule.message Pattern
        (Printf.sprintf
-          "the sub-pattern %s stands at a field of type %s, which takes %s"
+          "the sub-pattern %s stands at a field of type %s, which %s"
           (quote (excerpt context sub.span))
           (quote (Type_name.of_ctype t))
-          takes))
+          what_stands_there))
 
 (* Whether selection reads a tag below the constructor of [pattern]. *)
 and reads_below (pattern : Selection.constructor_pattern) =
