@@ -482,6 +482,35 @@ implicit conversions that design 3.4 leaves out, each at its operation.
   $ ./golden.exe less.tc
   less.tc:2: error: '<' is not defined on the distinct type 'idx'; cast to 'int' [distinct-operation]
   [1]
+
+The operator is the token the parser read, not a pragma that a macro
+wrapping the operand in `_Pragma` leaves before it.
+
+  $ cat > quiet.tc <<'EOF'
+  > type idx = distinct int;
+  > int f(idx i) {
+  >   return
+  > #pragma GCC diagnostic push
+  >   i
+  > #pragma GCC diagnostic pop
+  >   - 1;
+  > }
+  > EOF
+  $ ./golden.exe quiet.tc
+  quiet.tc:5: error: '-' is not defined on the distinct type 'idx'; cast to 'int' [distinct-operation]
+  [1]
+  $ cat > quiet_assign.tc <<'EOF'
+  > type idx = distinct int;
+  > void f(idx i) {
+  >   i
+  > #pragma GCC diagnostic pop
+  >   += 1;
+  > }
+  > EOF
+  $ ./golden.exe quiet_assign.tc
+  quiet_assign.tc:3: error: '+=' is not defined on the distinct type 'idx'; cast to 'int' [distinct-operation]
+  [1]
+
   $ printf 'type d = distinct int;\nd f(int a) { return a; }\n' > convert.tc
   $ ./golden.exe convert.tc
   convert.tc:2: error: a value of type 'int' does not convert to 'd' without a cast [distinct-conversion]

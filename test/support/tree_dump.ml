@@ -296,11 +296,11 @@ let rec expression reader (e : expression) =
   | Cast { type_name = t; operand } ->
       here "cast" [ type_name reader t; sub operand ]
   | Binary (operator, left, right) ->
-      here (binary_label operator) [ sub left; sub right ]
+      here (binary_label operator.node) [ sub left; sub right ]
   | Conditional { condition; if_true; if_false } ->
       here "?:" [ sub condition; optional sub if_true; sub if_false ]
   | Assignment (operator, left, right) ->
-      here (assignment_label operator) [ sub left; sub right ]
+      here (assignment_label operator.node) [ sub left; sub right ]
   | Comma (left, right) -> here "," [ sub left; sub right ]
   | Try { operand } -> here "try" [ sub operand ]
   | Statement_expression body -> here "({})" [ block reader body ]
@@ -622,7 +622,7 @@ and arm reader (a : arm) =
 and arm_label reader (l : arm_label) =
   match l.node with
   | Default_arm_label -> node l.span "default" []
-  | Pattern_label p -> pattern reader l.span p
+  | Pattern_label p -> pattern reader l.span p.node
 
 and pattern reader span { constructor; sub_patterns } =
   node span "case"

@@ -235,6 +235,31 @@ Each refusal is located at the construct it concerns.
   shared.tc:5: error: the labels 'A' and 'B(i)' share an arm, so 'i' may not be bound in it; give each label its own arm [shared-arm-binding]
   [1]
 
+A pragma that a macro leaves around a pattern is no part of the label
+that the message quotes:
+
+  $ cat > shared_pragma.tc <<'EOF'
+  > type e = | A | B(int i);
+  > void f(e v) {
+  >   match (v) {
+  >   case
+  > #pragma GCC diagnostic push
+  >   A
+  > #pragma GCC diagnostic pop
+  >   :
+  >   case B(
+  > #pragma GCC diagnostic push
+  >   i
+  > #pragma GCC diagnostic pop
+  >   ):
+  >     break;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe shared_pragma.tc
+  shared_pragma.tc:11: error: the labels 'A' and 'B( i )' share an arm, so 'i' may not be bound in it; give each label its own arm [shared-arm-binding]
+  [1]
+
 A C programmer's shared case, with each label binding the same name:
 
   $ cat > shared_both.tc <<'EOF'

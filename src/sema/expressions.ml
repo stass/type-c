@@ -1017,7 +1017,9 @@ let rec discarded_value (discarded : Tree.expression) =
    increment and a decrement keep their effect in place. *)
 let used_by_effects (value : Tree.expression) =
   match value.node with
-  | Binary ((Logical_and | Logical_or), _, _) | Conditional _ | Cast _ -> true
+  | Binary ({ node = Logical_and | Logical_or; _ }, _, _)
+  | Conditional _ | Cast _ ->
+      true
   | _ -> false
 
 (* Design 13.5: whether lowering casts [discarded], an expression whose
@@ -1080,7 +1082,8 @@ let record_site context ~variant_type site =
    arguments and return, sizeof, _Alignof, unary &, the comma and the
    branches of ?:. Every other operation refuses it, a new one too. *)
 let reads_distinct : Tree.expression_node -> bool = function
-  | Binary ((Equal_to | Not_equal_to | Logical_and | Logical_or), _, _)
+  | Binary
+      ({ node = Equal_to | Not_equal_to | Logical_and | Logical_or; _ }, _, _)
   | Unary (Logical_not, _)
   | Cast _ ->
       true
@@ -1538,17 +1541,17 @@ let token_spelling context index =
 let spelling context (span : Tree.span) = token_spelling context span.first
 
 (* The operation of [whole], as a refusal of a distinct operand names it:
-   an operator by its token, which follows a left operand and begins a
-   prefix operation. *)
+   an operator by the token the parser read it from, which begins a
+   prefix operation and ends a postfix one. *)
 let distinct_reader context (whole : Tree.expression) =
   let operator token = Operator (token_spelling context token) in
   match whole.node with
-  | Binary (_, left, _) | Assignment (_, left, _) ->
-      operator (left.span.last + 1)
+  | Binary ({ span; _ }, _, _) | Assignment ({ span; _ }, _, _) ->
+      operator span.first
   | Unary _ -> operator whole.span.first
   | Post_increment _ | Post_decrement _ -> operator whole.span.last
-  | Member { operand; _ } | Pointer_member { operand; _ } ->
-      operator (operand.span.last + 1)
+  | Member _ -> Operator "."
+  | Pointer_member _ -> Operator "->"
   | Subscript _ -> Operator "[]"
   | Call _ -> Operand "a called function"
   | _ -> Unnamed_operation
@@ -2688,7 +2691,7 @@ let gives_dependence context (whole : Tree.expression) =
   | Sizeof_expression _ | Sizeof_type _ | Alignof _ | Alignof_expression _
   | Offsetof _ ->
       measures_parameter context whole
-  | Binary ((Add | Subtract), left, right)
+  | Binary ({ node = Add | Subtract; _ }, left, right)
   | Subscript { operand = left; index = right } ->
       points_to_parameter context left || points_to_parameter context right
   | Member { operand; _ } | Pointer_member { operand; _ } ->
@@ -3303,18 +3306,20 @@ let classify_node context (whole : Tree.expression) typed =
       measured context operand_type (fun () -> integer Opaque)
   | Cast { type_name; operand } ->
       cast_constant context span typed (context.type_name type_name) operand
-  | Binary (Logical_and, left, right) ->
+  | Binary ({ node = Logical_and; _ }, left, right) ->
       logical_constant context span typed ~decisive:false Logical_and left
         right
-  | Binary (Logical_or, left, right) ->
+  | Binary ({ node = Logical_or; _ }, left, right) ->
       logical_constant context span typed ~decisive:true Logical_or left right
   | Binary
-      ( (( Less_than | Greater_than | Less_or_equal | Greater_or_equal
-         | Equal_to | Not_equal_to ) as op),
+      ( { node =
+            ( Less_than | Greater_than | Less_or_equal | Greater_or_equal
+            | Equal_to | Not_equal_to ) as op;
+          _ },
         left,
         right ) ->
       comparison_constant context span op left right
-  | Binary (op, left, right) ->
+  | Binary ({ node = op; _ }, left, right) ->
       binary_constant context span typed op left right
   | Conditional { condition; if_true; if_false } ->
       let second = Option.value if_true ~default:condition in
@@ -4310,7 +4315,7 @@ and expression_node context position (whole : Tree.expression) =
       refuse_record_cast context span ~target:cast_type
         ~source:cast_operand.expression_type;
       value (call_or_cast_type context span cast_type)
-  | Binary (op, left, right) ->
+  | Binary ({ node = op; _ }, left, right) ->
       let remedy = variant_remedy op in
       let left_typed = typed ~remedy left in
       let right_typed = typed ~remedy right in
@@ -4318,12 +4323,12 @@ and expression_node context position (whole : Tree.expression) =
       value (binary_type context span op left_typed right_typed)
   | Conditional { condition; if_true; if_false } ->
       value (conditional context span position condition if_true if_false)
-  | Assignment ((Assign as op), left, right) ->
+  | Assignment ({ node = Assign as op; _ }, left, right) ->
       let left_typed = as_whole left in
       let right_position = Targeted left_typed.expression_type in
       assignment context span op left_typed
         (positioned context right_position right)
-  | Assignment ((Compound_assign _ as op), left, right) ->
+  | Assignment ({ node = Compound_assign _ as op; _ }, left, right) ->
       let left_typed = typed left in
       assignment context span op left_typed (typed right)
   (* 6.5.17p2: the right operand's value. *)
@@ -6106,7 +6111,7 @@ and labelled_patterns context reading root (arm : Tree.arm) =
     (fun (label : Tree.arm_label) ->
       match label.node with
       | Default_arm_label -> (label, None)
-      | Pattern_label pattern ->
+      | Pattern_label { node = pattern; _ } ->
           ( label,
             Some
               (constructor_pattern context reading root ~position:[]
@@ -6346,10 +6351,7 @@ and quoted_labels context (arm : Tree.arm) =
   List.map
     (fun (label : Tree.arm_label) ->
       match label.node with
-      | Pattern_label _ ->
-          quote
-            (excerpt context
-               { first = label.span.first + 1; last = label.span.last - 1 })
+      | Pattern_label pattern -> quote (excerpt context pattern.span)
       | Default_arm_label -> quote "default")
     arm.node.labels
 

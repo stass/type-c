@@ -905,16 +905,28 @@ let spelling (result : t) (token : Token.t) =
     ->
       String.sub result.text.bytes token.start token.length
 
+(* A pragma token is a line of its own, which a macro's [_Pragma] may
+   leave inside an expression; the text that a message quotes is the
+   tokens around it. *)
+let is_pragma (token : Token.t) =
+  match token.kind with
+  | Pragma _ | Typec_pragma -> true
+  | Identifier _ | Number | Character _ | String _ | Punctuator _ -> false
+
 let excerpt (result : t) ~first ~last =
   let words = Buffer.create 32 in
+  let written = ref None in
   for index = first to last do
     let token = result.tokens.(index) in
-    if index > first then begin
-      let before = result.tokens.(index - 1) in
-      if before.start + before.length < token.start then
-        Buffer.add_char words ' '
-    end;
-    Buffer.add_string words (spelling result token)
+    if not (is_pragma token) then begin
+      (match !written with
+      | Some (before : Token.t) when before.start + before.length < token.start
+        ->
+          Buffer.add_char words ' '
+      | Some _ | None -> ());
+      Buffer.add_string words (spelling result token);
+      written := Some token
+    end
   done;
   Buffer.contents words
 

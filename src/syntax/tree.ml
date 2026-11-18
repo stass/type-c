@@ -260,7 +260,9 @@ and expression_node =
   | Alignof of type_name
   | Alignof_expression of expression  (** GNU *)
   | Cast of { type_name : type_name; operand : expression }
-  | Binary of binary_operator * expression * expression
+  | Binary of binary_operator spanned * expression * expression
+      (** the operator at the token the parser read it from, which a
+          message quotes *)
   | Conditional of {
       condition : expression;
       if_true : expression option;
@@ -268,7 +270,8 @@ and expression_node =
               zero; [a] is evaluated once *)
       if_false : expression;
     }
-  | Assignment of assignment_operator * expression * expression
+  | Assignment of assignment_operator spanned * expression * expression
+      (** the operator spanned as in [Binary] *)
   | Comma of expression * expression
   | Try of { operand : expression }
       (** Type-C's [try] (design 5.1), in Type-C text where no
@@ -621,7 +624,11 @@ and arm_node = { labels : arm_label list; items : block_item list }
     the [:]. *)
 and arm_label = arm_label_node spanned
 
-and arm_label_node = Pattern_label of pattern | Default_arm_label
+and arm_label_node =
+  | Pattern_label of pattern spanned
+      (** the pattern without the [case] and the [:], which a message
+          quotes *)
+  | Default_arm_label
 
 (** A constructor of the variant of its position, unqualified, and its
     sub-patterns in parentheses, [None] without them (design 4.1 rule 3,

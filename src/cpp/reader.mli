@@ -138,8 +138,8 @@ val spelling : t -> Token.t -> string
 val excerpt : t -> first:int -> last:int -> string
 (** [excerpt result ~first ~last] spells the tokens from [first] to
     [last] with one space wherever white space or a line marker parts
-    two of them in the text: how a message quotes a phrase of the
-    source. *)
+    two of them in the text, leaving out pragma tokens: how a message
+    quotes a phrase of the source. *)
 
 (** The [count] tokens from the token [first], or the place in front of
     the token [first] when [count] is 0: what a replacement replaces;

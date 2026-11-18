@@ -2129,6 +2129,14 @@ let fail_own_name state ~at name =
        ^ " is used in its own definition, which is not a structure or \
           union specifier"))
 
+(* The operator [operator] at the next token, read as a node of its own
+   so that a message quotes the operator's own token, not a pragma
+   between it and its operand. *)
+let operator_token state operator =
+  let start = state.position in
+  advance state;
+  finish state start operator
+
 let identifier state expected =
   match peek state with
   | Identifier_token name ->
@@ -3759,7 +3767,7 @@ and assignment_expression state =
     let operand = conditional_expression state in
     match assignment_operator (peek state) with
     | Some operator when is_unary_expression operand ->
-        advance state;
+        let operator = operator_token state operator in
         let assign right = Assignment (operator, operand, right) in
         collect ((start, assign) :: prefixes)
     | Some _ ->
@@ -3809,7 +3817,7 @@ and binary_expression state minimum =
     match binary_operator (peek state) with
     | Some (operator, precedence) when precedence >= minimum ->
         if operator = Logical_and || operator = Logical_or then hoist left;
-        advance state;
+        let operator = operator_token state operator in
         let right = binary_expression state (precedence + 1) in
         loop (finish state start (Binary (operator, left, right)))
     | Some _ | None -> left
@@ -4847,7 +4855,9 @@ and arm_label state =
     if accept_keyword state Keyword.Default then Default_arm_label
     else begin
       advance state;
-      Pattern_label (bound_pattern state (pattern_words state))
+      let pattern_start = state.position in
+      let pattern = bound_pattern state (pattern_words state) in
+      Pattern_label (finish state pattern_start pattern)
     end
   in
   expect state P.Colon "`:` after the label of an arm";

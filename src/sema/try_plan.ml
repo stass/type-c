@@ -123,9 +123,9 @@ let rec expression walk (value : Tree.expression) =
   | Pointer_member { operand; member = _ } ->
       as_value operand
   | Subscript { operand; index } -> as_value operand @ as_value index
-  | Binary (Logical_and, first, second) ->
+  | Binary ({ node = Logical_and; _ }, first, second) ->
       guarded walk first [ (second, When_true) ]
-  | Binary (Logical_or, first, second) ->
+  | Binary ({ node = Logical_or; _ }, first, second) ->
       guarded walk first [ (second, When_false) ]
   | Binary (_, left, right) -> as_value left @ as_value right
   | Conditional { condition; if_true = Some if_true; if_false } ->
