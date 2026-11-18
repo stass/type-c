@@ -146,8 +146,8 @@ remove them all:
 ## Running on Apple Silicon
 
 `tools/gate.sh` runs natively on an Apple Silicon Mac as on an Intel
-one; provisionally, until a native run passes (`TODO.md`, "Test
-hosts"). Two things differ. Homebrew lives in `/opt/homebrew`, and the
+one, with nothing skipped but what the run's `TYPEC_TEST_REQUIRE_*`
+variables allow. Two things differ. Homebrew lives in `/opt/homebrew`, and the
 tests find its GCC as the `gcc-16` on the `PATH`, which must be the
 arm64 one: `brew shellenv` puts `/opt/homebrew/bin` first, but an x86
 Homebrew left in `/usr/local/bin` by a migration from an Intel Mac

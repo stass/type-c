@@ -1480,28 +1480,11 @@ the package, in the order of its commits:
 x86-64, and on Alpine 3.24 (musl), x86-64 and arm64 (the latter under
 emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
 
-- [High] macOS on arm64, a platform of release 1.0, has never run the
-  gate. Run it natively as docs/development.md, "Running on Apple
-  Silicon", says. Only that run can confirm these:
-  * Homebrew's GCC 16 for arm64 links `-fsanitize=address,undefined`,
-    which `defer.t`, `slices.t`, `nested_tests.t`, `nested_patterns.t`,
-    `slice_lowering.t`, `try_expressions.t` and `containers.t` use.
-  * That GCC reports the facts of `target.t`'s `Darwin arm64` entry as
-    Apple's Clang does (signed plain char, 8-byte `long double`,
-    `wchar_t` int), and has every optional floating type the test
-    expects, `_Float64x` and `_Float128` included.
-  * The trap of a checked index stops lldb at the line of the check
-    with both backends, as the lldb examples of `docs/tutorial.md`
-    need.
-  * The objects of GCC and Apple's Clang link together under the arm64
-    calling convention, variadic calls included (`abi.t`,
-    `c_header.t`).
-  * `arm-none-eabi-gcc` from Homebrew runs the Arm tests.
-  * The OCaml runtime on macOS arm64 behaves as on Linux arm64 in
-    `test_small_stack` and `test_deep_trees`.
-  The emitted C and the target query were checked for arm64 macOS from
-  an Intel Mac, with `clang -arch arm64`, which cannot run what it
-  builds.
+- [Medium] No host runs the gate on an Apple Silicon Mac by itself:
+  the owner runs it by hand, as docs/development.md, "Running on Apple
+  Silicon", says. Add such a host to `tools/hosts` (over ssh, as
+  FreeBSD) so arm64 macOS is tested with every change, not only at a
+  release.
 
 - [Medium] No Linux host runs GCC 14, the oldest GCC that typec
   supports: the Debian host tests GCC 16 and Alpine has GCC 15, so only

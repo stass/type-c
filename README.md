@@ -1504,6 +1504,10 @@ stages, each ending in a measured gate, and the three pilots build
 with this release
 ([Measured on a real library](#measured-on-a-real-library)).
 
+The test suite passes with Clang and with GCC on macOS, x86-64 and
+arm64, and on Linux, with glibc on x86-64 and with musl on x86-64 and
+arm64 ([Building and testing](#building-and-testing)).
+
 Designed and **not yet implemented**: a checked mode, whose rules are
 provisional, that rules out specific classes of memory errors in the
 functions it covers (Stage 5 of the plan).
