@@ -522,7 +522,9 @@ be:
    with a copy of the field and scoped to its arm; assigning to it is an
    error, as for a `const` object (C11 6.5.16p2). The names a label
    binds are distinct, and an arm's own declarations may not redeclare
-   them (C11 6.7p3), though a nested block may hide them.
+   them (C11 6.7p3), though a nested block may hide them. One that its
+   arm never reads draws the backend's `-Wunused-variable`, as an unused
+   local does; write `_` for a field the arm does not need.
 4. `*P` follows the pointer, which must point to a valid object. Its
    pointee is not `volatile` or atomic.
 5. There are no constants, alternatives or guards inside a pattern:

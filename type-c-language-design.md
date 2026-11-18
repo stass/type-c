@@ -1138,7 +1138,10 @@ expression form; a C local assigned in each arm does that job.
    decides which of these an identifier alone is (4.7 rules 2 and 3).
 4. A binding declares a non-modifiable object of the
    field's type in the scope of its arm, initialised with a copy of the
-   field.
+   field. It is diagnosed as a local of C: one that its arm never reads
+   draws the backend's `-Wunused-variable`, under the options and
+   pragmas that govern any local, and `_` discards a field that the arm
+   does not read.
 5. Each arm is a block of its own. Its bindings and declarations are
    invisible to other arms and after the match, and a declaration may follow
    a label directly. The bindings and the block items of the arm are one
@@ -1180,6 +1183,21 @@ named in every
 state, `s->rcpts`, though through the payload it is reached in `Mail`
 only; and the pointer is the program's to keep valid, as any C pointer
 is.
+
+Rationale for leaving an unused binding to the backend. An unused
+binding is what an unused local is in C, often a sign that the arm
+reads the wrong name, and the user who builds with `-Wall` asks to be
+told of it. The backend already reports it: the binding is a C local
+declared where its arm begins, so its warning follows
+`-Wunused-variable`, `-Wno-unused`, `-w` and `-Werror=` as they stand
+for the unit and `#pragma GCC diagnostic` as it stands at the arm, and
+names the binding. `typec` reports no warnings of its own; to report
+this one it would gain a kind of diagnostic and repeat each backend's
+model of these options and pragmas, a second source of a fact the
+backend owns. To silence it on the lowered declaration would drop a
+warning that C gives. The warning is located as any diagnostic of a
+lowered construct is, by the line where the arm's pattern begins and
+not by its column (13.2, P15).
 
 Constructors that share an arm. Rule 6 keeps a shared arm from binding, so
 a family of constructors with the same fields that most code treats alike

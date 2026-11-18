@@ -97,3 +97,58 @@ stays directly before it.
   >   unrolled.tc
   $ ./gcc-unrolled
   8 0
+
+A binding is a C local, so one that its arm never reads draws the
+backend's -Wunused-variable, under the options and pragmas that govern
+any local, at the line where its arm's pattern begins (design 4.1 rule
+4); `_` discards a field, and a binding that is read draws nothing.
+A pragma that ignores the warning around an arm covers its bindings,
+which are declared where the arm begins. The column is that of the
+lowered declaration and Clang quotes that declaration (design P15), so
+only the location's line and the message are shown.
+
+  $ cat > unused.tc <<'EOF'
+  > type tree = | Leaf(int n) | Node(tree *l, tree *r);
+  > int leaf(const tree *t) {
+  >   if (case Leaf(n) = *t)
+  >     return 1;
+  >   match (*t) {
+  >   case Node(*Leaf(a), *Leaf(b)):
+  >     return a;
+  >   default:
+  >     return 0;
+  >   }
+  > }
+  > EOF
+  $ sed 's/Leaf(n)/Leaf(_)/; s/Leaf(b)/Leaf(_)/' unused.tc > discarded.tc
+  $ cat > ignored.tc <<'EOF'
+  > type tree = | Leaf(int n) | Node(tree *l, tree *r);
+  > int leaf(const tree *t) {
+  > #pragma GCC diagnostic push
+  > #pragma GCC diagnostic ignored "-Wunused-variable"
+  >   if (case Leaf(n) = *t)
+  >     return 1;
+  > #pragma GCC diagnostic pop
+  >   match (*t) {
+  > #pragma GCC diagnostic push
+  > #pragma GCC diagnostic ignored "-Wunused-variable"
+  >   case Node(*Leaf(a), *Leaf(b)):
+  >     return a;
+  > #pragma GCC diagnostic pop
+  >   default:
+  >     return 0;
+  >   }
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc="$cc" -Wall -Wextra -Werror -c unused.tc 2>&1 |
+  >     sed -n 's/^\(unused\.tc:[0-9]*\):[0-9]*:/\1:/p'
+  >   typec --cc="$cc" -Wall -Wextra -Werror -Wno-unused-variable \
+  >     -c unused.tc &&
+  >   typec --cc="$cc" -Wall -Wextra -Werror -c discarded.tc &&
+  >   typec --cc="$cc" -Wall -Wextra -Werror -c ignored.tc
+  > done
+  unused.tc:3: error: unused variable 'n' [-Werror,-Wunused-variable]
+  unused.tc:6: error: unused variable 'b' [-Werror,-Wunused-variable]
+  unused.tc:3: error: unused variable 'n' [-Werror=unused-variable]
+  unused.tc:6: error: unused variable 'b' [-Werror=unused-variable]

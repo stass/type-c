@@ -98,14 +98,6 @@ The items are ordered by how often real code meets them.
   so the fix there is a loop around a test; `require_condition` could
   take the statement. The scrutinee of `->` is parenthesised after `*`
   unless it is a name, so `(p)->j` reads `*((p))`.
-- [Low] A binding that its arm never uses fails a `-Werror` build with
-  the backend's `-Wunused-variable`, which quotes the lowered text,
-  `const __typeof__(__tc_match0->u.Circle.r) r = ...`. Proposed: the
-  lowered declaration carries the source line and spelling only, so the
-  backend quotes the pattern, or `typec` reports "the binding 'r' of
-  'Circle(r)' is not used; write '_'" and lowering marks bindings
-  unused; see the item on backend diagnostics of lowered constructs
-  under "Driver". Source: probe; Pilot B's record, friction 3.
 - [Low] `private-creation`: `(port)80` outside the owner gives "the
   distinct type 'port' is private to './priv.tci', so only the text of
   its owner creates its values", naming the owner by the path the
@@ -241,8 +233,17 @@ The items are ordered by how often real code meets them.
   reads from the `.tc` file. Clang also quotes text that lowering adds
   and the source does not hold: under `-Wunreachable-code`, Pilot B's
   `toml.tc:563:1` shows `__builtin_trap();`, where line 563 is the `}`
-  that ends a function. Design 15 (P15) decides who preprocesses, and
-  with it what a backend can quote.
+  that ends a function. A binding that its arm never reads draws
+  `-Wunused-variable` (design 4.1 rule 4), for which Clang quotes the
+  lowered declaration, `case shape_Circle: { const
+  __typeof__(__tc_match0->u.Circle.r) r = ...`, and Pilot B took it for
+  code it could not see (record, friction 3); GCC 16 quotes the
+  pattern's line but puts its caret at the name's column in the
+  emitted text, past the end of that line. P15 leaves the backend
+  preprocessing and locations without columns. Proposed: lowering puts
+  a construct's own text on a physical line that holds only text from
+  the source line, as a binding's name after the line marker of its
+  pattern, so that Clang quotes no text the source does not hold.
 - [Low] With Clang the debug information names the compilation unit
   after the emitted file, an absolute path in the random temporary
   directory (GCC names it after the `.tc` input), so a Clang build with
