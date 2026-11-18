@@ -403,7 +403,9 @@ pointer to char that the callee may write through (use).
 Each line above has a partner that fails where the prelude is missing
 or wrong. Written where it stands as a statement expression that
 returns, each try of two runs in the order of the arguments that the
-backend chooses, and GCC gives the error of b.
+backend chooses, which C leaves unspecified: GCC gives the error of b
+on x86-64 and that of a on AArch64, in place of typec's error of a.
+Either way one call alone runs, and its error is returned.
 
   $ typec --cc=$gcc --emit-c -o holders.i holders.tc
   $ sed '/^static result_int both(void)/,/^}/c\
@@ -411,8 +413,10 @@ backend chooses, and GCC gives the error of b.
   >   ({ struct result__ii __tc_t0 = a(); if (__tc_t0.tag != result__ii_Ok) return __tc_t0; __tc_t0.u.Ok.value; }),\
   >   ({ struct result__ii __tc_t1 = b(); if (__tc_t1.tag != result__ii_Ok) return __tc_t1; __tc_t1.u.Ok.value; })) } }); }
   > ' holders.i > two.i
-  $ $gcc -std=gnu11 -o two -x cpp-output two.i && ./two | grep two
-  two: error 2 [b]
+  $ $gcc -std=gnu11 -o two -x cpp-output two.i && ./two | grep two |
+  >   sed -e 's/error 1 \[a\]/the error of a or b/' \
+  >     -e 's/error 2 \[b\]/the error of a or b/'
+  two: the error of a or b
 
 Without the if of its prelude, the try under && calls check with a null
 pointer.
