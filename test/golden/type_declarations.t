@@ -566,7 +566,14 @@ on the object refuses it (design 3.4).
   > void f(id *p) { (void)__atomic_fetch_add(p, 1, 5); }
   > EOF
   $ ./golden.exe atomic.tc
-  atomic.tc:2: error: '__atomic_fetch_add' is not defined on the distinct type 'id'; cast to 'unsigned int' [distinct-operation]
+  atomic.tc:2: error: '__atomic_fetch_add' is not defined on the distinct type 'id'; cast the pointer to 'unsigned int *' [distinct-operation]
+  [1]
+  $ cat > switched.tc <<'EOF'
+  > type id = distinct unsigned;
+  > void f(id x) { switch (x) { default: ; } }
+  > EOF
+  $ ./golden.exe switched.tc
+  switched.tc:2: error: the controlling expression of a switch may not be of the distinct type 'id'; cast it to 'unsigned int' [distinct-operation]
   [1]
   $ cat > exchange.tc <<'EOF'
   > type id = distinct unsigned;

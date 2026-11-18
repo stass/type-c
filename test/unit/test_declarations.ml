@@ -2015,8 +2015,8 @@ let distinct_types () =
         "'<' is not defined on the distinct type 'id'; cast to 'unsigned \
          int'" );
       ( "switch (a) { default: ; } return a;",
-        "this operation is not defined on the distinct type 'id'; cast to \
-         'unsigned int'" );
+        "the controlling expression of a switch may not be of the distinct \
+         type 'id'; cast it to 'unsigned int'" );
       ( "int t[2]; return (id)t[a];",
         "an index may not be of the distinct type 'id'; cast it to \
          'unsigned int'" );
@@ -2083,9 +2083,9 @@ let distinct_operands () =
       "id x = a; return __sync_add_and_fetch(&x, a);";
       "id x = a; __atomic_store_n(&x, a, a); return a;" ];
   rejects ~file (types ^ "static int t[(id)2];")
-    "this operation is not defined on the distinct type 'id'";
+    "an array length may not be of the distinct type 'id'";
   rejects ~file (in_function "goto *r;")
-    "this operation is not defined on the distinct type 'ref'";
+    "the target of a computed goto may not be of the distinct type 'ref'";
   List.iter mixed
     [ "id x = a; unsigned *q = &u; return (id)(&x == q);";
       "id x = a; unsigned *q = &u; return (id)(&x < q);";

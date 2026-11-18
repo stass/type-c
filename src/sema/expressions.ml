@@ -1237,6 +1237,28 @@ let refuse_distinct context span reader (distinct : Ctype.distinct) =
        (not_defined reader ("the distinct type " ^ name) ^ "; " ^ cast
       ^ underlying))
 
+(* A builtin [name] that reads the distinct object [referenced] through
+   the pointer that is its first argument: the cast that reaches the
+   representation converts the pointer, keeping the object's
+   qualifiers. *)
+let refuse_distinct_object context span name (referenced : Ctype.t)
+    (distinct : Ctype.distinct) =
+  let cast =
+    match
+      Result.bind
+        (Ctype.qualify referenced.qualifiers distinct.representation)
+        Ctype.pointer_to
+    with
+    | Ok pointer ->
+        "; cast the pointer to " ^ quote (Type_name.of_ctype pointer)
+    | Error _ -> ""
+  in
+  context.fail span
+    (Rule.message Distinct_operation
+       (not_defined (Operator name)
+          ("the distinct type " ^ distinct_name distinct)
+       ^ cast))
+
 (* An operand of an operation at [span], as the operation sees it;
    [reads] says whether the table lets the operation read a value of a
    distinct type, and [reader] names the operation where it does not. *)
@@ -3620,11 +3642,10 @@ let object_of_first context span name first =
    type (design 3.4). *)
 let pointee_of_first context span name first =
   match operand context first with
-  | Pointer_operand { referenced = { shape = Distinct distinct; _ }; _ }
+  | Pointer_operand
+      { referenced = { shape = Distinct distinct; _ } as referenced; _ }
     when is_type_c_text context span ->
-      refuse_distinct context span
-        (Operator name)
-        distinct
+      refuse_distinct_object context span name referenced distinct
   | Pointer_operand _ | Arithmetic_operand _ | Distinct_operand _
   | Other_operand _ | Unknown_operand _ ->
       object_of_first context span name first
@@ -4419,11 +4440,12 @@ let note_typed context (expression : Tree.expression) typed =
 
 (* The value of an expression that an operation reads (design 3.4): the
    plain typing entry, which refuses a value of a distinct type in Type-C
-   text and gives C text the representation. Only the uses that design
+   text, naming the expression by its [role], as "an array length", and
+   gives C text the representation. Only the uses that design
    3.4 lets take such a value whole call [whole_value] instead. *)
-let rec expression context (expression : Tree.expression) =
+let rec expression context ~role (expression : Tree.expression) =
   let typed = whole_value context expression in
-  read_operand context expression.span ~reads:false ~reader:Unnamed_operation
+  read_operand context expression.span ~reads:false ~reader:(Operand role)
     typed
 
 (* An expression without a target type, which its use takes whole: it
@@ -4488,7 +4510,8 @@ and refuse_conversion ?(receiver = Assigned) context
   let refused () =
     match named () with
     | Some refused -> refused
-    | None -> value_of_type source (conversion_hint context converted ~source ~target)
+    | None ->
+        value_of_type source (conversion_hint context converted ~source ~target)
   in
   refuse_record_conversion context span ~receiver ~target ~source ~refused;
   let crosses =
@@ -4587,7 +4610,8 @@ and making_hint context (converted : Tree.expression) ~source ~target =
         List.filter (Fun.negate has_fields) constructors,
         holding_constructor context converted ~source ~target constructors )
     with
-    | true, [ empty ], _ -> Printf.sprintf "; write %s for no value" (quote (name empty))
+    | true, [ empty ], _ ->
+        Printf.sprintf "; write %s for no value" (quote (name empty))
     | _, _, Some holder ->
         Printf.sprintf "; make one with %s"
           (quote (name holder ^ "(" ^ excerpt context converted.span ^ ")"))
@@ -5001,8 +5025,10 @@ and constructor_argument context named (field : Ctype.member) argument =
    the rest, whose target types it gives. *)
 and call_arguments context callee (callee_typed : typed) arguments =
   match (builtin_rule context callee, arguments) with
-  | Some (_, Moves_object { operands; _ }), first :: rest ->
-      let first_typed = expression context first in
+  | Some (name, Moves_object { operands; _ }), first :: rest ->
+      let first_typed =
+        expression context ~role:("the first argument of " ^ quote name) first
+      in
       let positions =
         moved_positions context first.span operands first_typed rest
       in
@@ -5359,7 +5385,9 @@ and generic context span controlling associations =
   selection
 
 and choose context span condition first second =
-  ignore (expression context condition);
+  ignore
+    (expression context ~role:"the condition of __builtin_choose_expr"
+       condition);
   choice context span condition first second
 
 (* The association of the selection at [span], with its type as the text
@@ -5642,15 +5670,16 @@ and offsetof_step context (reached : Ctype.t) (step : Tree.designator_node) =
       None
 
 and designator context (designator : Tree.designator) =
+  let designator_role = "an index of a designator" in
   match designator.node with
-  | Index index -> ignore (expression context index)
+  | Index index -> ignore (expression context ~role:designator_role index)
   | Index_range { low; high } ->
-      ignore (expression context low);
-      ignore (expression context high)
+      ignore (expression context ~role:designator_role low);
+      ignore (expression context ~role:designator_role high)
   | Member_designator _ -> ()
 
-and integer_constant context candidate =
-  ignore (expression context candidate);
+and integer_constant context ~role candidate =
+  ignore (expression context ~role candidate);
   constant_value context candidate
 
 (* The type and value of an integer constant expression typed before. *)
@@ -5889,7 +5918,7 @@ and initialiser context ~holder ~constant t initialiser =
       initialises_whole = initialises_whole context;
       type_c_text = is_type_c_text context;
       location = location_of context;
-      index = integer_constant context;
+      index = integer_constant context ~role:"an index of a designator";
       in_generic = context.generic_definition;
       lowers_zero = lowers_zero context holder;
       keeps_list = keeps_list context;
@@ -6041,7 +6070,8 @@ and standing_statement context standing labels (statement : Tree.statement) =
         (Expression value)
         (fun () -> discard context value)
   | Compound block -> block_items context block
-  | Computed_goto value -> ignore (expression context value)
+  | Computed_goto value ->
+      ignore (expression context ~role:"the target of a computed goto" value)
   | Attribute_statement attributes -> context.subjectless attributes
   | Null_statement | Goto _ | Continue _ | Break _ -> ()
   | If { condition = Controlling condition; then_branch; else_branch } ->
@@ -6130,7 +6160,10 @@ and for_clause context (clause : Tree.for_clause) =
 
 (* 6.8.4.2p1. *)
 and switch_controlling context controlling =
-  let typed = expression context controlling in
+  let typed =
+    expression context ~role:"the controlling expression of a switch"
+      controlling
+  in
   match operand context typed with
   | Arithmetic_operand { arithmetic = Integer _; _ } | Unknown_operand _ -> ()
   | Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
@@ -6185,7 +6218,9 @@ and label_of context (label : Tree.label) =
 
 (* 6.8.4.2p3: an integer constant expression. *)
 and case_value context value =
-  match operand context (expression context value) with
+  match
+    operand context (expression context ~role:"the value of a case label" value)
+  with
   | Arithmetic_operand { arithmetic = Integer _; _ } -> (
       match constant_value context value with
       | Ok _ -> ()
@@ -6204,7 +6239,10 @@ and case_value context value =
 
 and match_statement context (statement : Tree.statement) scrutinee arms
     ~hold =
-  let typed = hold (fun () -> expression context scrutinee) in
+  let typed =
+    hold (fun () ->
+        expression context ~role:"the scrutinee of a match" scrutinee)
+  in
   let t = typed.expression_type in
   let variant, constructors =
     scrutinee_variant context ~what:"the scrutinee of a match" scrutinee.span
@@ -6226,7 +6264,10 @@ and match_statement context (statement : Tree.statement) scrutinee arms
 and single_pattern_test context (statement : Tree.statement) ~pattern_span
     ~(pattern : Tree.pattern) ~(operand : Tree.expression) ~hold
     (controlled : Tree.statement) form =
-  let t = (hold (fun () -> expression context operand)).expression_type in
+  let read_operand_of_test () =
+    expression context ~role:"the operand of a single-pattern test" operand
+  in
+  let t = (hold read_operand_of_test).expression_type in
   let variant, constructors =
     scrutinee_variant context ~what:"the operand of a single-pattern test"
       operand.span t

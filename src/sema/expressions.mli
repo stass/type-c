@@ -647,13 +647,16 @@ val refuse_untested_outside : context -> unit
 
 val integer_constant :
   context ->
+  role:string ->
   Tree.expression ->
   (Integer.t * Integer_constant.t, Tree.span) result
 (** Types an expression where an integer constant expression is needed
     (6.6p6), and gives the type that typing gives it and its value, or
     the span of the first operand or operator that keeps it from being
     one. One that typec cannot evaluate or whose evaluation fails is an
-    error. An expression typed before raises [Invalid_argument]. *)
+    error; [role] names the expression in a refusal of its type, as "an
+    array length". An expression typed before raises [Invalid_argument].
+*)
 
 val initialiser :
   context ->

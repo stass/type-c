@@ -48,13 +48,6 @@ jump into or out of a deferred statement. No message cites a design
 section.
 The items are ordered by how often real code meets them.
 
-- [Medium] A distinct object refused by an atomic builtin
-  (`__atomic_fetch_add(&x, 1, 5)` with `id x`) is told "cast to
-  'unsigned int'", where the fix casts the pointer, `(unsigned int
-  *)&x`; name the pointer type there. The uses typed through the plain
-  entry (a switch, a case or enum constant, a designator index, an
-  array length, a scrutinee) say "this operation"; each could name its
-  role, as an index does.
 - [Medium] `Expressions.listed` names every entry it is given, so the
   bound on a message's list (`Selection.max_named`, through
   `Selection.named_first`) holds only where each caller cuts the list

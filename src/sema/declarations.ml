@@ -1974,7 +1974,9 @@ and alignment state (alignment : Tree.alignment) =
               alignment differs between arguments");
       needs_complete state t
   | Alignas_expression expression -> (
-      match constant_expression state expression with
+      match
+        constant_expression state ~role:"the operand of _Alignas" expression
+      with
       | Constant _ -> ()
       | Not_constant span ->
           fail state span
@@ -2260,7 +2262,7 @@ and fail_completed_here state nesting t (completed : Location.t) =
          message = Rule.text (Rule.message Instance_placement message) })
 
 and bit_field_width state width =
-  match constant_expression state width with
+  match constant_expression state ~role:"the width of a bit-field" width with
   | Constant { value = Known width_value; _ } -> (
       match Exact_integer.to_int width_value with
       | Some bits -> bits
@@ -2379,7 +2381,10 @@ and fixed_enumerator_value state integer previous span
   in
   match (value, previous) with
   | Some expression, _ -> (
-      match constant_expression state expression with
+      match
+        constant_expression state ~role:"the value of an enumeration constant"
+          expression
+      with
       | Not_constant span ->
           fail state span
             (Rule.c_text
@@ -2399,7 +2404,10 @@ and enumerator_value state previous span (value : Tree.expression option) =
   let target = state.target in
   match (value, previous) with
   | Some expression, _ -> (
-      match constant_expression state expression with
+      match
+        constant_expression state ~role:"the value of an enumeration constant"
+          expression
+      with
       | Not_constant span ->
           fail state span
             (Rule.c_text
@@ -2471,7 +2479,10 @@ and enum_integer state span ~packed values =
 (* Static assertions (6.7.10) *)
 
 and static_assert state ({ condition; message } : Tree.static_assertion) =
-  match constant_expression state condition with
+  match
+    constant_expression state ~role:"the condition of a static assertion"
+      condition
+  with
   | Not_constant span ->
       fail state span
         (Rule.c_text
@@ -2632,7 +2643,7 @@ and array_length state span (size : Tree.array_size) : Ctype.length =
       fail state span
         (Rule.c_text "[*] outside function prototype scope (C11 6.7.6.2p4)")
   | Sized expression | Static_sized expression -> (
-      match constant_expression state expression with
+      match constant_expression state ~role:"an array length" expression with
       | Constant { value = Known length; _ } -> (
           match Exact_integer.to_int length with
           | Some length -> Constant length
@@ -2864,8 +2875,8 @@ and read_new_type_name state (type_name : Tree.type_name) =
 
 (* What the expression declares stays declared, as in C, though it is
    not a constant. *)
-and constant_expression state expression =
-  match Expressions.integer_constant (typing state) expression with
+and constant_expression state ~role expression =
+  match Expressions.integer_constant (typing state) ~role expression with
   | Ok (integer_type, value) -> Constant { integer_type; value }
   | Error span -> Not_constant span
 
