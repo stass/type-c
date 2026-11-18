@@ -21,6 +21,21 @@ one file at a time.
 Type-C is early: every example on this page works today, and the rest
 of the language is designed but not built yet ([Status](#status)).
 
+## Installing
+
+With [Homebrew](https://brew.sh), on macOS or Linux:
+
+```sh
+brew install stass/tap/typec
+typec --version
+man typec
+```
+
+Homebrew builds `typec` from the release source with OCaml and dune.
+`typec` hands its C to `cc` unless told otherwise
+([Choosing the backend](#choosing-the-backend)). To build it from a
+checkout instead, see [Try it](#try-it).
+
 ## A first look
 
 An evaluator of arithmetic expression trees, which reports a division
