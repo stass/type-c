@@ -1771,10 +1771,32 @@ types (design 13.3).
 
 ## Language reference
 
-- [Medium] Write sections 9 (interfaces and privacy), 10 (C clients and
-  headers, once `--emit-c-header` is complete), 12 (checked mode) and 13
-  (the driver) of `docs/reference.md`, which point to the design and to
-  typec(1) instead.
+- [Medium] Write sections 10 (C clients and headers, once
+  `--emit-c-header` is complete) and 12 (checked mode) of
+  `docs/reference.md`, which point to the design instead.
+- [Low] The README states `typec`'s exit statuses in five sections
+  ("Choosing the backend", "Compiling a `.tc` input", "Printing the
+  target model", "Printing the version", "What typec reports"), copies
+  of typec(1)'s EXIT STATUS, which `test/unit/test_manual.ml` checks
+  against the driver while nothing checks the copies. Have the README
+  point to typec(1) for them, as `docs/reference.md` does.
+- [Low] typec(1) (DESCRIPTION) and the README ("Compiling a `.tc`
+  input") call an input a Type-C unit when it ends in `.tc` "with no
+  `-x` other than `-x none` before it", but `typec -x c -x none x.tc`
+  compiles `x.tc` as Type-C: the rule is that the last `-x` before it,
+  if any, is `-x none`. Say so in typec(1) and have the README point
+  to it.
+- [Low] Neither the design nor `docs/reference.md` says that C text
+  cannot write a constructor expression: in a `.h`, `Q(1)` gives
+  "'Q' is not declared" and `T.C` "expected an expression, found the
+  type name", for a public variant too, while reference 1.1 says the
+  grammar is the same for both texts. State the restriction (design
+  2.1 and reference 1.1), or make C text take constructors.
+- [Low] Design 9.2 rule 4 says that a line marker in the source can
+  name the owner's file and so claim its rights, but a client unit
+  that begins with `# 1 "ticket.tc"` is still refused
+  `[private-creation]`. Find which marker, if any, claims the rights,
+  and correct the design to match.
 - [Low] `docs/reference.md` does not state some rules that a user can
   meet: `[excess-initializer]` (design 5.2), the pragma rules
   `[try-pragma]`, `[deferred-pragma]` and `[instance-pragma]`, the

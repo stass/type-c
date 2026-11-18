@@ -1223,8 +1223,176 @@ $ ./slices
 
 ## 9. Interfaces and privacy
 
-`.tci` interfaces, and `private` types and constructors: design
-section 9.
+### 9.1 Interfaces
+
+A `.tci` file is a header written in Type-C. It holds what a C header
+holds, and also type declarations ([2](#2-type-declarations)) and
+generic function definitions ([7](#7-generic-functions)), and
+`#include` reads it as it reads any header. There is no module system
+and no import statement.
+
+1. Types and functions follow C's rules across translation units
+   (C11 6.2.2, 6.2.7): a unit sees a declaration by including it, and
+   units agree on a type by including one interface.
+2. A type declaration is never repeated [type-redeclaration], so an
+   interface that a unit may reach twice has an include guard.
+3. A `.tc` file that includes its own interface has its definitions
+   checked against the interface's declarations by C's rule for
+   redeclarations (C11 6.7p4).
+4. `type N;` in an interface, completed by the definition of the
+   variant in the `.tc` file ([2.1](#21-forms-and-names)), hides the
+   representation: in a unit that sees only the interface, `N` is an
+   incomplete type (C11 6.2.5p1), which the unit holds through
+   pointers and does not match on [match-scrutinee].
+5. A generic function that an interface defines is compiled in each
+   unit that uses it ([7.3](#73-instances)).
+
+### 9.2 `private`
+
+```text
+type name = private | C1(fields) | C2 ...;
+type name = private distinct type-name;
+```
+
+1. `private` restricts the creation of values to the *owner* of the
+   type: for a variant, constructor expressions; for a distinct type,
+   casts to it. Outside the owner, every such constructor expression or
+   cast is refused, also one that creates no value, as `sizeof((D)1)`
+   or the identity cast `(D)d` [private-creation]. Everything else
+   stays open: a client matches on a private variant, reads its fields,
+   and casts a private distinct value to another type.
+2. The owner is the text of the file that holds the definition. When
+   that file is `M.tci`, the owner is also the text of `M.tc`, if
+   `M.tc` is the file that the command line names (not one that
+   another file includes). `M.tci` and `M.tc` compare by the last
+   component of their paths.
+3. Tokens that a macro produces belong to the file where the macro is
+   expanded, so a macro of `M.tci` gives a client no right of the
+   owner.
+4. The zero value is open to every client: `(T){0}`, and the
+   initialisers `{0}` and `{}`. A compound literal of a private
+   distinct type with another value is refused by
+   [2.4](#24-distinct-types), as an implicit conversion to the
+   distinct type [distinct-conversion].
+5. Only Type-C text is bound: C text may cast to a private distinct
+   type. An operation that reinterprets storage, such as `*(D *)p`, a
+   union member, `va_arg` or a copy of bytes, makes a private value
+   outside the rule. `private` is a design aid, not a security boundary.
+
+An interface with an incomplete variant and two private types, in a
+directory that `-Iinclude` names:
+
+<!-- file: include/ticket.tci -->
+```c
+#ifndef TICKET_TCI
+#define TICKET_TCI
+
+type counter;
+type ticket = private distinct unsigned;
+type answer = private
+    | Granted(ticket t)
+    | Refused;
+
+counter *counter_new(unsigned limit);
+answer counter_take(counter *c);
+void counter_free(counter *c);
+
+#endif
+```
+
+Its owner, which completes `counter` and creates the values:
+
+<!-- file: ticket.tc -->
+```c
+#include <stdlib.h>
+#include "ticket.tci"
+
+type counter = | Counter(unsigned next, unsigned limit);
+
+counter *
+counter_new(unsigned limit)
+{
+	counter *c = malloc(sizeof(*c));
+
+	if (c != NULL)
+		*c = Counter(0, limit);
+	return (c);
+}
+
+answer
+counter_take(counter *c)
+{
+	match (*c) {
+	case Counter(next, limit):
+		if (next == limit)
+			return (Refused);
+		*c = Counter(next + 1, limit);
+		return (Granted((ticket)next));
+	}
+}
+
+void
+counter_free(counter *c)
+{
+	free(c);
+}
+```
+
+A client, which matches on `answer` and reads a `ticket`:
+
+<!-- file: queue.tc -->
+```c
+#include <stdio.h>
+#include "ticket.tci"
+
+int
+main(void)
+{
+	counter *c = counter_new(2);
+
+	if (c == NULL)
+		return (1);
+	for (int i = 0; i < 3; i++) {
+		match (counter_take(c)) {
+		case Granted(t):
+			printf("ticket %u\n", (unsigned)t);
+			break;
+		case Refused:
+			printf("refused\n");
+			break;
+		}
+	}
+	counter_free(c);
+	return (0);
+}
+```
+
+```console
+$ typec -Wall -Wextra -Werror -Iinclude -o queue queue.tc ticket.tc
+$ ./queue
+ticket 0
+ticket 1
+refused
+```
+
+A client that creates a value:
+
+<!-- file: forged.tc -->
+```c
+#include "ticket.tci"
+
+answer
+forged(void)
+{
+	return (Refused);
+}
+```
+
+```console
+$ typec -Iinclude -c forged.tc
+forged.tc:6: error: the variant 'answer' is private to 'include/ticket.tci', so only the text of its owner creates its values [private-creation]
+[80]
+```
 
 ## 10. C clients and headers
 
@@ -1291,5 +1459,61 @@ section 11.
 
 ## 13. The driver
 
-`typec` compiles `.tc` files and passes the rest of its command line
-to the C compiler; [typec(1)](typec.1) describes its options.
+`typec` takes the command line of `cc` and stands in for it in a build:
+it compiles each Type-C unit and hands every other input and option to
+the *backend*, the C compiler that it runs. [typec(1)](typec.1) states
+which input is a Type-C unit, how the backend is chosen, the options of
+`typec`, the options that it refuses with a Type-C unit, its
+environment and its exit statuses. This section says how a unit passes
+through the backend.
+
+1. A unit passes through three steps:
+   1. the backend preprocesses it, with `__TYPEC__` defined and the
+      dialect of [1.2](#12-c11-and-the-dialect);
+   2. `typec` reads the preprocessed text, checks it by the rules of
+      this page and lowers it to C11. It stops at the first error, which
+      it prints as `file:line: error: message`, without a column;
+   3. the backend compiles that C as preprocessed C, under the options
+      of the command line, as it would compile the unit's `.c` file:
+      `-c`, `-S`, `-o` and linking make the outputs that they make for a
+      `.c` file, under the same names.
+2. The dependency options reach the first step, so the rule of a unit
+   names its `.tc` file and every header and interface that it
+   includes, as the rule of a `.c` file does. A build tool therefore
+   compiles a `.tc` file as it compiles a `.c` file; the
+   [README](../README.md#in-a-build) gives rules for make, ninja and
+   CMake.
+3. The rules of C that `typec` does not check are the backend's: an
+   error in the third step comes with the backend's message and status.
+4. `--emit-c` writes the C of the second step. It is preprocessed for
+   one target, so the command takes the options of the build; the
+   backend compiles the C as preprocessed C (a `.i` file) under the
+   `-std=` of [1.2](#12-c11-and-the-dialect) and the options that the
+   [README](../README.md#compiling-a-tc-input) gives the third step.
+5. `--print-target` prints the target model for which the second step
+   reads a unit, as the backend gives it under the other options of the
+   command line, which are therefore those of the build.
+6. `--trap-function=name` is described in
+   [11](#11-checks-and-the-trap).
+
+The unit `ticket.tc` of [9.2](#92-private) with its dependency file,
+`queue.tc` through its C, and a refused option:
+
+```console
+$ typec -Wall -Wextra -Werror -Iinclude -MMD -c ticket.tc
+$ cat ticket.d
+ticket.o: ticket.tc include/ticket.tci
+$ typec -Iinclude --emit-c -o queue.i queue.tc
+$ cc -std=gnu17 -Wall -Wextra -Werror -c queue.i
+$ cc -o tickets queue.o ticket.o
+$ ./tickets
+ticket 0
+ticket 1
+refused
+$ typec --print-target | grep -e '^char_bit' -e '^sizeof_int:'
+char_bit: 8
+sizeof_int: 4
+$ typec -Iinclude -E queue.tc
+typec: -E cannot be used with a .tc input: it stops after preprocessing; --emit-c writes the C of a .tc input
+[81]
+```
