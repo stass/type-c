@@ -13,13 +13,12 @@ against hand-written C. How to build `typec` and run its tests is in the
 ## Linux test hosts
 
 `tools/hosts` describes each Linux host that the suite runs on as a
-Dockerfile, with the base image pinned by digest and the compilers, the
-C library and OCaml by version: Debian 13 (glibc) and Alpine 3.24
-(musl), each with the distribution's GCC and Clang, and OCaml 5.4 and
-dune from Alpine's packages and from opam on Debian. The Debian image
-also has GCC 16 as `/usr/bin/gcc-16`, from Debian testing as
-snapshot.debian.org had it at a fixed timestamp, so that the pinned
-version stays installable. The image names it in `TYPEC_TEST_GCC`, so
+Dockerfile, whose header says how it pins what it installs: Debian 13
+(glibc) and Alpine 3.24 (musl), each with the distribution's GCC and
+Clang, and OCaml 5.4 and dune from Alpine's packages and from opam on
+Debian. The Debian image also has GCC 16 as `/usr/bin/gcc-16`, from
+Debian testing at the snapshot.debian.org timestamp from which it
+takes all its Debian packages. The image names it in `TYPEC_TEST_GCC`, so
 the Debian hosts test GCC 16 and not the image's GCC 14, and Clang
 takes GCC 16's runtime libraries. A host is a
 Dockerfile and a platform, and its name says both: `debian-amd64`,

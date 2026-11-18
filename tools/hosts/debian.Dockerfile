@@ -22,7 +22,9 @@
 # new version (ninja-build is 1.12.1-1 on amd64 and 1.12.1-1+b1 on
 # arm64). A snapshot's Release file expires a week after its date,
 # hence Check-Valid-Until no; its signature is still checked against
-# the archive key, which is what makes plain HTTP safe here.
+# the archive key. That proves the packages are Debian's but not which
+# snapshot they come from, so plain HTTP is used only where the slim
+# base image has no CA bundle yet, for the first install.
 #
 # Debian 13 stops at GCC 14, so GCC 16 comes from Debian testing (forky),
 # from which apt takes gcc-16 and the newer runtime libraries of GCC that
@@ -63,7 +65,7 @@ RUN printf '%s\n' \
 # again, so that no later install takes anything from it.
 RUN printf '%s\n' \
       'Types: deb' \
-      "URIs: http://snapshot.debian.org/archive/debian/$SNAPSHOT/" \
+      "URIs: https://snapshot.debian.org/archive/debian/$SNAPSHOT/" \
       'Suites: forky' \
       'Components: main' \
       'Check-Valid-Until: no' \
