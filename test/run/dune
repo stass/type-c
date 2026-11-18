@@ -31,10 +31,15 @@
  (applies_to version)
  (deps %{project_root}/dune-project))
 
+; Each probe lists its module: without (modules), every executable of the
+; directory owns every module, and @check type-checks a probe with the
+; libraries of another stanza.
+
 ; read.t runs the reader on the output of both backends.
 
 (executable
  (name read_check)
+ (modules read_check)
  (libraries typec_cpp typec_test_support))
 
 (cram
@@ -45,6 +50,7 @@
 
 (executable
  (name type_probe)
+ (modules type_probe)
  (libraries typec_sema typec_driver))
 
 (cram
@@ -55,6 +61,7 @@
 
 (executable
  (name pack_probe)
+ (modules pack_probe)
  (libraries typec_cpp typec_emit typec_test_support))
 
 (cram
@@ -65,6 +72,7 @@
 
 (executable
  (name parse_check)
+ (modules parse_check)
  (libraries typec_cpp typec_syntax typec_sema typec_test_support))
 
 (cram
@@ -76,6 +84,7 @@
 
 (executable
  (name declaration_probe)
+ (modules declaration_probe)
  (libraries typec_cpp typec_syntax typec_sema))
 
 (cram
@@ -88,10 +97,12 @@
 
 (executable
  (name expression_probe)
+ (modules expression_probe)
  (libraries typec_cpp typec_syntax typec_sema))
 
 (executable
  (name builtin_probe)
+ (modules builtin_probe)
  (libraries typec_sema))
 
 (cram
@@ -106,6 +117,7 @@
 
 (executable
  (name moved_probe)
+ (modules moved_probe)
  (libraries typec_cpp typec_syntax typec_emit typec_test_support))
 
 (cram
@@ -117,6 +129,7 @@
 
 (executable
  (name moved_pragma_probe)
+ (modules moved_pragma_probe)
  (libraries typec_cpp typec_syntax typec_emit typec_test_support))
 
 (cram

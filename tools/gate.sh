@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
-# The gate to run before a commit: builds typec, runs the default test
-# suite, then builds the typing oracle and runs its tests, which compare
-# typec's types with Clang's and build only in the oracle context
-# (docs/development.md, "Typing oracle").
+# The gate to run before a commit: builds typec, type-checks every
+# stanza (@check compiles every module of every stanza, not only the
+# modules each program links), runs the default test suite, then builds
+# the typing oracle and runs its tests, which compare typec's types with
+# Clang's and build only in the oracle context (docs/development.md,
+# "Typing oracle").
 #
 # Usage: tools/gate.sh
 #
@@ -74,6 +76,7 @@ mkdir -p "$(dirname "$GATE_LOG")" "$ORACLE_BUILD" || exit 1
 : >"$GATE_LOG"
 
 step "dune build" dune build --root .
+step "dune check" dune build --root . @check
 step "dune test" dune test --root .
 step "oracle tests" dune build --root . \
 	--workspace tools/oracle/oracle.workspace \

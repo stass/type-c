@@ -1575,9 +1575,9 @@ TYPEC_TEST_GCC=/usr/bin/gcc dune test   # with another GCC
 
 `dune exec typec -- ARGS` runs the compiler from the build tree.
 
-`tools/gate.sh` is the command to run before a commit: it runs `dune build`
-and `dune test`, then builds the typing oracle and runs its tests, which
-`dune test` skips (see
+`tools/gate.sh` is the command to run before a commit: it runs `dune build`,
+`dune build @check` and `dune test`, then builds the typing oracle and
+runs its tests, which `dune test` skips (see
 [Typing oracle](docs/development.md#typing-oracle)). It needs the opam
 switch `tools` and fails, saying where to find how to create it, when the
 switch is missing. Before its steps it prints that report, which
