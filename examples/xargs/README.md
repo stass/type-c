@@ -54,7 +54,7 @@ make check
 TYPEC_CC=gcc-14 make clean check
 ```
 
-Four things stand between upstream's C and other systems, and the
+Five things stand between upstream's C and other systems, and the
 [Makefile](Makefile) handles each outside the sources, so that
 `original/` stays as upstream has it:
 
@@ -65,8 +65,12 @@ Four things stand between upstream's C and other systems, and the
   `strnsubst.c` uses: `compat.h` includes `<stdint.h>` on Linux;
 * `xargs.c` includes FreeBSD's `<sys/limits.h>`:
   [`original/compat/sys/limits.h`](original/compat/sys/limits.h)
-  includes `<limits.h>` instead, on every system but FreeBSD. The port
-  includes `<limits.h>` itself;
+  includes `<limits.h>` instead where the system has none, as the
+  Makefile searches `original/compat` with `-idirafter`, after the
+  system's directories. The port includes `<limits.h>` itself;
+* `strnsubst.c` includes `<sys/cdefs.h>`, which musl lacks:
+  [`original/compat/sys/cdefs.h`](original/compat/sys/cdefs.h) is an
+  empty one, found the same way;
 * macOS declares `vfork` deprecated, and `xargs.c` compares an `int` with
   an `rlim_t`, so the Makefile turns those two warnings off where they
   apply.
@@ -556,12 +560,14 @@ allocation beside it.
    it, runs it, and exits 0.
 3. **The move of a partial argument** uses `memmove`. Both programs print
    the same where the C library's `memcpy` happens to copy forwards, as
-   on macOS, where the check runs it; the original is undefined there.
+   on macOS and glibc; the original is undefined there, and with musl's
+   `memcpy` it loses the moved argument.
 
 The port also frees the utility's name that `prerun` copies for each
 command of `-I`, and the response of `-p` on its error paths, which
 change nothing that the check sees. `check.sh` runs the port alone on
-the command lines of 1 and 2, against the output that xargs(1) gives.
+the command lines of 1, 2 and 3, against the output that xargs(1)
+gives.
 
 ## What the port found
 
@@ -622,7 +628,8 @@ built with AddressSanitizer:
 <!-- untested: the report of AddressSanitizer differs from run to run -->
 ```console
 $ cc -g -fsanitize=address -Wno-deprecated-declarations \
-    -I original/compat -I original original/xargs.c original/strnsubst.c \
+    -idirafter original/compat -I original original/xargs.c \
+    original/strnsubst.c \
     -o xargs-asan
 $ printf 'aa bbbbbbbbbbbbbbbbbbbbbb c\n' | ./xargs-asan -s 30 echo
 aa

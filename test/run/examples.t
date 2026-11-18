@@ -33,7 +33,7 @@ gmake where make is another, as on FreeBSD.
   ringbuf: the objects need only the board; 23 cases agree with original/driver, 5 as expected
   smtp: 44 cases agree with original/smtpd
   wordfreq: 30 cases agree with original/wordfreq
-  xargs: 82 cases agree with original/xargs, 7 with xargs(1)
+  xargs: 81 cases agree with original/xargs, 8 with xargs(1)
   $ check "$clang" -O2
   cut: 102 cases agree with original/cut, 8 with cut(1)
   dns: 27 cases agree with original/dns
@@ -41,7 +41,7 @@ gmake where make is another, as on FreeBSD.
   ringbuf: the objects need only the board; 23 cases agree with original/driver, 5 as expected
   smtp: 44 cases agree with original/smtpd
   wordfreq: 30 cases agree with original/wordfreq
-  xargs: 82 cases agree with original/xargs, 7 with xargs(1)
+  xargs: 81 cases agree with original/xargs, 8 with xargs(1)
   $ check "$gcc" -O0
   cut: 102 cases agree with original/cut, 8 with cut(1)
   dns: 27 cases agree with original/dns
@@ -49,7 +49,7 @@ gmake where make is another, as on FreeBSD.
   ringbuf: the objects need only the board; 23 cases agree with original/driver, 5 as expected
   smtp: 44 cases agree with original/smtpd
   wordfreq: 30 cases agree with original/wordfreq
-  xargs: 82 cases agree with original/xargs, 7 with xargs(1)
+  xargs: 81 cases agree with original/xargs, 8 with xargs(1)
   $ check "$gcc" -O2
   cut: 102 cases agree with original/cut, 8 with cut(1)
   dns: 27 cases agree with original/dns
@@ -57,4 +57,4 @@ gmake where make is another, as on FreeBSD.
   ringbuf: the objects need only the board; 23 cases agree with original/driver, 5 as expected
   smtp: 44 cases agree with original/smtpd
   wordfreq: 30 cases agree with original/wordfreq
-  xargs: 82 cases agree with original/xargs, 7 with xargs(1)
+  xargs: 81 cases agree with original/xargs, 8 with xargs(1)

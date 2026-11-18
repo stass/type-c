@@ -18,7 +18,7 @@ is [type-c-language-design.md](type-c-language-design.md).
   design 15 cites its record by commit. The review of diagnostics,
   `/Volumes/Optaine/diag-review`, is no repository yet, so TODO.md
   cites it by path alone; make it one. (`tools/hosts` runs the Linux
-  hosts in containers, the arm64 ones under emulation, and the FreeBSD
+  hosts in containers, the arm64 one under emulation, and the FreeBSD
   one over ssh, on a machine of the owner's.)
 
 ## Diagnostic quality (plan package 4.2)
@@ -1476,8 +1476,8 @@ the package, in the order of its commits:
 
 ## Test hosts
 
-`tools/hosts` runs the suite on Debian 13 (glibc) and Alpine 3.24
-(musl) in containers, each on x86-64 and on arm64 (the latter under
+`tools/hosts` runs the suite in containers on Debian 13 (glibc),
+x86-64, and on Alpine 3.24 (musl), x86-64 and arm64 (the latter under
 emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
 
 - [High] macOS on arm64, a platform of release 1.0, has never run the
@@ -1504,31 +1504,16 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   builds.
 
 - [Medium] No Linux host runs GCC 14, the oldest GCC that typec
-  supports: the Debian hosts test GCC 16 and Alpine has GCC 15, so only
+  supports: the Debian host tests GCC 16 and Alpine has GCC 15, so only
   FreeBSD over ssh (x86-64) runs it, with no arm64 or glibc run. Add a
   Debian host that takes the image's `/usr/bin/gcc`, for example by a
   `run.sh` host name that passes `TYPEC_TEST_GCC` to the container.
-- [High] The Alpine hosts fail the suite on both architectures, as
-  tests written for glibc and macOS meet musl: GCC on musl has no
-  sanitizer runtimes at all and the image no Clang ones (`compiler-rt`
-  is not installed), which fails every test that links with
-  `-fsanitize=address,undefined` (`defer.t`, `nested_patterns.t`,
-  `nested_tests.t`, `slices.t`, `slice_lowering.t`,
-  `containers.t`, `try_expressions.t`); musl has no `getcontext`, used
-  by `slice_lowering.t`; and the examples that `examples.t` builds need
-  `<sys/cdefs.h>` (xargs) and a UTF-8 locale (cut's `check.sh`), which
-  musl and the image lack. Decide whether such a test probes for what it
-  needs and skips without it, with a `TYPEC_TEST_REQUIRE_` variable that
-  the Debian hosts set, as `-m32`, the Arm backends and lldb do in
-  `test/run/backends.sh`, or whether the image or the examples change.
-- [Critical] debian-arm64 fails nearly every test that assembles with
-  GCC: on arm64 GCC 16 writes the AArch64 build attributes
-  (`.aeabi_subsection`, `.aeabi_attribute`), which trixie's binutils
-  2.44 rejects, while gcc-16 declares only binutils >= 2.39. Forky's
-  binutils (2.47.50) knows them but Breaks libc6-dev < 2.42-10, so it
-  cannot join trixie's held C library. Decide between moving the Debian
-  host to testing's glibc (forky as the base), a binutils of 2.45 or
-  later built for trixie, or testing GCC 16 only on another arm64 host.
+- [Low] Restore a `debian-arm64` host to `tools/hosts/run.sh` once
+  Debian's gcc-16 and binutils agree on trixie, or once the Debian host
+  moves to a newer base. On arm64 GCC 16 writes the AArch64 build
+  attributes (`.aeabi_subsection`, `.aeabi_attribute`), which trixie's
+  binutils 2.44 rejects, while gcc-16 declares only binutils >= 2.39;
+  forky's binutils knows them but Breaks trixie's libc6-dev.
 - [Low] `test/run/c_header.t` cannot tell `-MD` from `-MMD`, nor `-M`
   from `-MM`: its interface includes no system header and the rules are
   made under `-nostdinc`, so a driver that passed the one for the other
@@ -1576,14 +1561,13 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
 - [Low] No host sets `TYPEC_TEST_REQUIRE_M32`, which makes `dune test`
   fail when the backends cannot compile `<limits.h>` with `-m32`. The
   Dockerfiles install no 32-bit headers; `tools/hosts/freebsd.sh` probably
-  has them but passes only `TYPEC_TEST_CLANG` and `TYPEC_TEST_GCC` to the
-  remote `dune test`. Once a p620 run prints no `-m32` note, pass the
+  has them but does not pass the variable to the remote `dune test`. Once a p620 run prints no `-m32` note, pass the
   variable there.
 - [Low] `test/run/abi.t` does not carry `compound` from Type-C to C or
   through a callback, nor a distinct type as a variant field.
 - [Low] `tools/oracle/oracle.t` has its own default of
   `TYPEC_TEST_CLANG` instead of sourcing `test/run/backends.sh`.
-- [Medium] The arm64 hosts run under qemu-user 10.2.3 (registered with
+- [Medium] The arm64 host runs under qemu-user 10.2.3 (registered with
   `tonistiigi/binfmt --install arm64` after uninstalling the VM's 7.0.0
   handler; a `colima restart` may bring 7.0.0 back, which kills about 1
   in 100 GCC compilations). A native arm64

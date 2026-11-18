@@ -53,7 +53,7 @@ set -eu
 usage() {
   echo "usage: $0 [--source DIR] HOST [LOG]" >&2
   echo "       $0 [--source DIR] --corpus HOST LOG PROGRAM..." >&2
-  echo "hosts: debian-amd64 debian-arm64 alpine-amd64 alpine-arm64" \
+  echo "hosts: debian-amd64 alpine-amd64 alpine-arm64" \
     "freebsd (not with --corpus)" >&2
   exit 2
 }
@@ -91,7 +91,6 @@ fi
 dockerfile='' platform='' script=''
 case $host in
   debian-amd64) dockerfile=debian.Dockerfile platform=linux/amd64 ;;
-  debian-arm64) dockerfile=debian.Dockerfile platform=linux/arm64 ;;
   alpine-amd64) dockerfile=alpine.Dockerfile platform=linux/amd64 ;;
   alpine-arm64) dockerfile=alpine.Dockerfile platform=linux/arm64 ;;
   freebsd) script=freebsd.sh ;;

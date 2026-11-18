@@ -20,10 +20,11 @@
 # TYPEC_TEST_CLANG names the Clang of the oracle tests as for the other
 # tests. The gate first prints the report of test/run/backends.sh: the
 # Arm backends of short_enums.t and c_header.t that run and those
-# skipped, a dropped -m32, and whether the lldb examples of the tutorial
-# run; a TYPEC_TEST_REQUIRE_ARM, TYPEC_TEST_REQUIRE_M32 or
-# TYPEC_TEST_REQUIRE_LLDB that is set makes a skip of what it names fail
-# the gate. Exits 0 only when every step passes.
+# skipped, a dropped -m32, whether the lldb examples of the tutorial run,
+# and whether slice_lowering.t runs getcontext; a TYPEC_TEST_REQUIRE_ARM,
+# TYPEC_TEST_REQUIRE_M32, TYPEC_TEST_REQUIRE_LLDB or
+# TYPEC_TEST_REQUIRE_GETCONTEXT that is set makes a skip of what it names
+# fail the gate. Exits 0 only when every step passes.
 
 set -u
 

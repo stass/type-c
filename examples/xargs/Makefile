@@ -27,15 +27,14 @@ xargs: $(PORT_OBJS)
 $(PORT_OBJS) $(ORIGINAL_OBJS): CPPFLAGS += -include original/compat.h \
     -I original
 
-# xargs.c includes FreeBSD's <sys/limits.h>, which compat/ stands in for
-# elsewhere.  macOS declares vfork(2) deprecated.  The original compares
-# an int with an rlim_t, and GCC takes its "case -1" of vfork, which ends
-# in xexit, a function not declared to return never, to fall through.
-# The flags are added with override, so that a CFLAGS on the command
-# line keeps them.
-ifneq ($(shell uname -s),FreeBSD)
-$(ORIGINAL_OBJS): CPPFLAGS += -I original/compat
-endif
+# xargs.c includes FreeBSD's <sys/limits.h>, and strnsubst.c
+# <sys/cdefs.h>, which compat/ stands in for where the system has none:
+# -idirafter searches it after the system's directories.  macOS declares
+# vfork(2) deprecated.  The original compares an int with an rlim_t, and
+# GCC takes its "case -1" of vfork, which ends in xexit, a function not
+# declared to return never, to fall through.  The flags are added with
+# override, so that a CFLAGS on the command line keeps them.
+$(ORIGINAL_OBJS): CPPFLAGS += -idirafter original/compat
 $(PORT_OBJS) $(ORIGINAL_OBJS): \
     override CFLAGS += -Wno-deprecated-declarations
 $(ORIGINAL_OBJS): \

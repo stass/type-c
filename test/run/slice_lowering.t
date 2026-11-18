@@ -666,7 +666,9 @@ operand. The partner, the same run with an index out of range at the
 second return, traps. The statement expression needs -std=gnu11, so
 this section drops -pedantic-errors and the conversion warnings, and
 macOS marks the ucontext functions deprecated. A `resume()` that
-returns, as where `getcontext` failed, aborts the run.
+returns, as where `getcontext` failed, aborts the run. The route of
+`getcontext` runs where both backends link it (backends.sh reports a
+skip). Each run prints what resume.expected holds.
 
   $ cat > resume.tc <<'EOF'
   > #define _XOPEN_SOURCE 700
@@ -718,44 +720,18 @@ returns, as where `getcontext` failed, aborts the run.
   >   }
   > }
   > EOF
+  $ printf '%s\n' 'phase 0 reads 10' 'phase 2 reads 10' \
+  >   'phase 0 reads 10' trapped > resume.expected
+  $ routes=SETJMP
+  $ if getcontext_present; then routes="$routes GETCONTEXT"; fi
   $ for cc in $clang $gcc; do
   >   for level in -O0 -O2; do
-  >     for route in SETJMP GETCONTEXT; do
+  >     for route in $routes; do
   >       typec --cc=$cc -std=gnu11 -Wall -Wextra -Werror \
-  >         -Wno-deprecated-declarations $level -D$route -o resume resume.tc &&
-  >       ./resume && traps ./resume out
+  >         -Wno-deprecated-declarations $level -D$route -o resume resume.tc ||
+  >         exit 1
+  >       { ./resume && traps ./resume out; } > resume.out
+  >       diff resume.expected resume.out || echo "$cc $level $route differs"
   >     done
   >   done
   > done
-  phase 0 reads 10
-  phase 2 reads 10
-  phase 0 reads 10
-  trapped
-  phase 0 reads 10
-  phase 2 reads 10
-  phase 0 reads 10
-  trapped
-  phase 0 reads 10
-  phase 2 reads 10
-  phase 0 reads 10
-  trapped
-  phase 0 reads 10
-  phase 2 reads 10
-  phase 0 reads 10
-  trapped
-  phase 0 reads 10
-  phase 2 reads 10
-  phase 0 reads 10
-  trapped
-  phase 0 reads 10
-  phase 2 reads 10
-  phase 0 reads 10
-  trapped
-  phase 0 reads 10
-  phase 2 reads 10
-  phase 0 reads 10
-  trapped
-  phase 0 reads 10
-  phase 2 reads 10
-  phase 0 reads 10
-  trapped

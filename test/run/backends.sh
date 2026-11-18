@@ -13,7 +13,9 @@
 # TYPEC_TEST_REQUIRE_ARM, when set and not empty, declares that the host
 # has both Arm backends of those tests. TYPEC_TEST_REQUIRE_LLDB, when
 # set and not empty, declares that lldb runs on the host for the
-# examples of docs/tutorial.md that use it.
+# examples of docs/tutorial.md that use it. TYPEC_TEST_REQUIRE_GETCONTEXT,
+# when set and not empty, declares that both backends link getcontext,
+# for slice_lowering.t.
 
 clang=${TYPEC_TEST_CLANG:-/usr/bin/clang}
 gcc=${TYPEC_TEST_GCC:-gcc-16}
@@ -44,6 +46,23 @@ lldb_present() (
   lldb_status=$?
   rm -rf "$lldb_dir"
   return $lldb_status
+)
+
+# Whether both backends link a call of getcontext, which slice_lowering.t
+# resumes an index with: musl has none. The directory is made in the
+# current one, as for lldb_present.
+getcontext_present() (
+  context_dir=$(mktemp -d ./getcontext.XXXXXX) || return 1
+  printf '%s\n' '#define _XOPEN_SOURCE 700' '#include <ucontext.h>' \
+    'int main(void) { ucontext_t c; return getcontext(&c); }' \
+    > "$context_dir/probe.c"
+  context_status=0
+  for context_cc in "$clang" "$gcc"; do
+    "$context_cc" -Wno-deprecated-declarations -o "$context_dir/probe" \
+      "$context_dir/probe.c" > /dev/null 2>&1 || context_status=1
+  done
+  rm -rf "$context_dir"
+  return $context_status
 )
 
 # The configurations of the Arm backends present, one per line: a
@@ -107,6 +126,7 @@ backends_report() (
   m32_report || report_status=1
   arm_report || report_status=1
   lldb_report || report_status=1
+  getcontext_report || report_status=1
   return $report_status
 )
 
@@ -169,6 +189,23 @@ lldb_report() {
   if [ -n "${TYPEC_TEST_REQUIRE_LLDB:-}" ]; then
     echo "backends.sh: TYPEC_TEST_REQUIRE_LLDB is set, but lldb" \
       "does not run" >&2
+    return 1
+  fi
+}
+
+# Prints whether slice_lowering.t resumes an index with getcontext or
+# skips it, and fails when it is skipped and
+# TYPEC_TEST_REQUIRE_GETCONTEXT is set.
+getcontext_report() {
+  if getcontext_present; then
+    echo "backends.sh: slice_lowering.t resumes an index with getcontext"
+    return 0
+  fi
+  echo "backends.sh: slice_lowering.t skips getcontext, which the" \
+    "backends do not both link"
+  if [ -n "${TYPEC_TEST_REQUIRE_GETCONTEXT:-}" ]; then
+    echo "backends.sh: TYPEC_TEST_REQUIRE_GETCONTEXT is set, but" \
+      "getcontext does not link" >&2
     return 1
   fi
 }

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
-# The Linux glibc test host, x86-64 or arm64: Debian 13 with GCC 16 from
+# The Linux glibc test host, x86-64: Debian 13 with GCC 16 from
 # Debian testing as the test GCC, a Clang from apt.llvm.org, the oldest
 # that typec supports (Target.minimum_major_version), as Debian 13's own
 # is older, and OCaml and dune from opam, since Debian 13's OCaml 5.3
@@ -97,7 +97,9 @@ RUN fingerprint=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421 \
  && rm -rf /var/lib/apt/lists/* \
  && ln -s clang-21 /usr/bin/clang
 
-ENV TYPEC_TEST_CLANG=/usr/bin/clang TYPEC_TEST_GCC=/usr/bin/gcc-16
+# glibc has getcontext, so its skip in slice_lowering.t fails the run.
+ENV TYPEC_TEST_CLANG=/usr/bin/clang TYPEC_TEST_GCC=/usr/bin/gcc-16 \
+    TYPEC_TEST_REQUIRE_GETCONTEXT=1
 
 RUN useradd --create-home typec
 USER typec

@@ -19,11 +19,11 @@ Clang, and OCaml 5.4 and dune from Alpine's packages and from opam on
 Debian. The Debian image also has GCC 16 as `/usr/bin/gcc-16`, from
 Debian testing at the snapshot.debian.org timestamp from which it
 takes all its Debian packages. The image names it in `TYPEC_TEST_GCC`, so
-the Debian hosts test GCC 16 and not the image's GCC 14, and Clang
-takes GCC 16's runtime libraries. A host is a
-Dockerfile and a platform, and its name says both: `debian-amd64`,
-`debian-arm64`, `alpine-amd64` and `alpine-arm64`.
-`tools/hosts/run.sh HOST [LOG]` builds the image of HOST and runs
+the Debian host tests GCC 16 and not the image's GCC 14, and Clang
+takes GCC 16's runtime libraries. A host is a Dockerfile and a
+platform, and its name says both: `debian-amd64`, `alpine-amd64` and
+`alpine-arm64`. `tools/hosts/run.sh HOST [LOG]` builds the image of
+HOST and runs
 `dune build` and `dune test` in a container of it, with the source
 mounted read-only, the build inside the container and no network. The
 image is tagged `typec-host-HOST:HASH`, HASH being the first twelve hex
@@ -70,11 +70,11 @@ git worktree add ~/typec-old 5670550
 tools/hosts/run.sh --source ~/typec-old debian-amd64
 ```
 
-The Alpine hosts and `debian-arm64` have known failures, explained in
-`TODO.md` under Test hosts: the sanitizer, `getcontext` and example
-tests on both Alpine hosts, which musl and the image cannot run, and
-every test that assembles with GCC 16 on `debian-arm64`, whose
-binutils does not know the directives that GCC 16 writes there.
+The report of `test/run/backends.sh`, which `dune test` prints, names
+each backend facility that a host lacks and the tests skip, such as
+`getcontext` on musl. The Debian image and the FreeBSD host set
+`TYPEC_TEST_REQUIRE_GETCONTEXT`, as their C libraries have it, so that a
+skip of it fails the run there.
 
 `tools/hosts/run.sh --corpus HOST LOG PROGRAM...` runs the corpus
 runner (see "Running the corpus") on the named programs in a container
@@ -177,9 +177,10 @@ it, drop `TYPEC_TEST_REQUIRE_LLDB` below and the gate skips them.
 
 Running the gate from the checkout, with its log and the oracle's
 build in `$HOME/typec-gate`. The `TYPEC_TEST_REQUIRE_*` variables turn
-a skip of the Arm backends or of lldb into a failure. Without them the
-gate passes and only reports the skip. `tee` hides the gate's exit
-status: the gate passed when `gate.out` ends in `gate: passed`.
+a skip of the Arm backends, of lldb or of `getcontext` into a failure.
+Without them the gate passes and only reports the skip. `tee` hides
+the gate's exit status: the gate passed when `gate.out` ends in
+`gate: passed`.
 
 ```sh
 export OPAMROOT=$HOME/typec-opam
@@ -187,7 +188,7 @@ out=$HOME/typec-gate
 mkdir -p "$out"
 ORACLE_BUILD=$out/_build GATE_LOG=$out/gate.log \
   TYPEC_TEST_REQUIRE_ARM=1 TYPEC_TEST_REQUIRE_LLDB=1 \
-  tools/gate.sh 2>&1 | tee "$out/gate.out"
+  TYPEC_TEST_REQUIRE_GETCONTEXT=1 tools/gate.sh 2>&1 | tee "$out/gate.out"
 { uname -a; sw_vers; /usr/bin/clang --version
   command -v gcc-16; gcc-16 -dumpmachine; gcc-16 --version
   for cc in /usr/bin/clang gcc-16; do

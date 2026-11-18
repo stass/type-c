@@ -134,7 +134,6 @@ same 'xargs -L 3 echo <lines'
 same 'xargs -0 -L 1 printf "[%s]\n" <nul'
 same 'xargs -s 20 echo <lines'
 same 'xargs --max-chars=12 echo <lines'
-same 'xargs -s 30 echo <shift'
 same 'xargs -s 10 echo <long'
 same 'xargs -s 5 echo <lines'
 same 'xargs -s 0 echo <lines'
@@ -218,6 +217,9 @@ expect 'xargs -I {} -S 5 echo ab{}c <lines' \
 # argument; the original runs the cut argument and exits 0.
 expect 'echo xy | xargs -I X -S 3 echo aXc' '' \
     'xargs: command line cannot be assembled, too long' 1
+# -s: an argument that does not fit moves to the start over itself,
+# which the original does with memcpy, undefined for overlapping ranges.
+expect 'xargs -s 30 echo <shift' 'aa\nbbbbbbbbbbbbbbbbbbbbbb c\n' '' 0
 
 if [ "$failed" -ne 0 ]; then
 	exit 1
