@@ -1483,11 +1483,16 @@ the package, in the order of its commits:
 (musl) in containers, each on x86-64 and on arm64 (the latter under
 emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
 
-- [Medium] `tools/hosts/run.sh` runs only the image's GCC, `gcc` 14 on
-  Debian, whose image fixes `TYPEC_TEST_GCC`, so the suite never runs
-  with the image's `gcc-16`, which only `docker run --env
-  TYPEC_TEST_GCC=/usr/bin/gcc-16` reaches by hand. Pass the variable
-  through `run.sh` or name a host for it.
+- [Medium] No Linux host runs GCC 14, the oldest GCC that typec
+  supports: the Debian hosts test GCC 16 and Alpine has GCC 15, so only
+  FreeBSD over ssh (x86-64) runs it, with no arm64 or glibc run. Add a
+  Debian host that takes the image's `/usr/bin/gcc`, for example by a
+  `run.sh` host name that passes `TYPEC_TEST_GCC` to the container.
+- [Medium] The trixie pins of `tools/hosts/debian.Dockerfile`
+  (`linux-libc-dev`, `libc6-dev`, `opam`) go stale when trixie's archive
+  drops their versions at a point release or security upload. Point the
+  base image's apt sources at snapshot.debian.org at one timestamp, as
+  the GCC 16 source is, so that every Debian pin stays installable.
 - [Low] `test/run/c_header.t` cannot tell `-MD` from `-MMD`, nor `-M`
   from `-MM`: its interface includes no system header and the rules are
   made under `-nostdinc`, so a driver that passed the one for the other
@@ -1601,6 +1606,8 @@ types (design 13.3).
   `CACHE/build/linux-x86_64/`, since the runner names a host by
   `uname -s` and `uname -m`, so a run of one replaces the other's.
   The name needs the C library if both hosts are to gate.
+  The Debian records of GCC now carry the name `gcc-16`, and its
+  earlier `gcc` ones in `runs/linux-x86_64/` stay unrefreshed.
 - [Medium] musl's recipe declares a substitute test (19 checks of
   ours), so gate 1 is not met for it: libc-test needs a system running
   musl. Its recipe links each directory relocatably (`ld -r`), which

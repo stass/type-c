@@ -1,28 +1,28 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
-# The Linux glibc test host, x86-64 or arm64: Debian 13 with its own GCC,
-# a Clang from apt.llvm.org, the oldest that typec supports
-# (Target.minimum_major_version), as Debian 13's own is older, and OCaml
-# and dune from opam, since Debian 13's OCaml 5.3 lacks the Char.Ascii of
-# 5.4 that tools/fuzz uses. The Clang comes with its sanitizer runtimes,
-# as the tests of test/run link with -fsanitize. The base image is pinned by the digest of its
+# The Linux glibc test host, x86-64 or arm64: Debian 13 with GCC 16 from
+# Debian testing as the test GCC, a Clang from apt.llvm.org, the oldest
+# that typec supports (Target.minimum_major_version), as Debian 13's own
+# is older, and OCaml and dune from opam, since Debian 13's OCaml 5.3
+# lacks the Char.Ascii of 5.4 that tools/fuzz uses. The Clang comes with
+# its sanitizer runtimes, as the tests of test/run link with
+# -fsanitize. The base image is pinned by the digest of its
 # multi-platform index; the compilers, the C library's and the kernel's
-# headers, file (the own suite of the corpus's chibicc runs it), and ninja
-# and CMake (the tests of the build rules run them), by package version,
-# the same on both platforms; the key of
-# apt.llvm.org by fingerprint; OCaml and dune by a commit of
-# opam-repository. Their own dependencies follow Debian 13, and Clang's
-# apt.llvm.org; GCC 16's follow Debian testing. A pinned version that leaves the archive fails the build
-# until it is bumped here.
+# headers, file (the own suite of the corpus's chibicc runs it), and
+# ninja and CMake (the tests of the build rules run them), by package
+# version, the same on both platforms; the key of apt.llvm.org by
+# fingerprint; OCaml and dune by a commit of opam-repository. Their own
+# dependencies follow Debian 13, Clang's apt.llvm.org, and GCC 16's the
+# snapshot of Debian testing below. A pinned version that leaves the
+# archive fails the build until it is bumped here.
 #
 # Debian 13 stops at GCC 14, so GCC 16 comes from Debian testing (forky),
 # from which apt takes gcc-16 and the newer runtime libraries of GCC that
-# it depends on, and nothing else. The suite runs with it as
-# TYPEC_TEST_GCC=/usr/bin/gcc-16; the default GCC of the image stays
-# GCC 14, but Clang takes its crt files and libgcc from the newest GCC
-# installation, so from GCC 16, and the sanitizer runtimes of GCC 14's
-# tests are GCC 16's.
+# it depends on, and nothing else. The suite runs with it as the test GCC
+# (TYPEC_TEST_GCC below); the image's own GCC 14 is installed but not
+# tested, and Clang takes its crt files and libgcc from the newest GCC
+# installation, so from GCC 16.
 
 FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 
@@ -36,13 +36,19 @@ RUN apt-get update \
       ca-certificates curl gpg git make patch unzip bzip2 \
  && rm -rf /var/lib/apt/lists/*
 
-# GCC 16 from Debian testing. The C library stays on hold, so that a
-# gcc-16 that needs a newer one fails the build instead of moving the
-# host to testing's glibc. The source list is removed again, so that no
-# later install takes anything from it. Testing keeps one version of a
-# package, so the pin below goes stale and is bumped like the others.
-RUN echo "deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg]" \
-      http://deb.debian.org/debian forky main \
+# GCC 16 from Debian testing, as snapshot.debian.org had it at the
+# timestamp below, since testing itself keeps one version of a package
+# and drops the pinned one at its next upload. A snapshot's Release file
+# expires a week after its date, hence check-valid-until=no; its
+# signature is still checked against the archive key. The timestamp and
+# the gcc-16 version change together. The C library stays on hold, so
+# that a gcc-16 that needs a newer one fails the build instead of moving
+# the host to testing's glibc. The source list is removed again, so that
+# no later install takes anything from it.
+RUN echo "deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg" \
+      "check-valid-until=no]" \
+      https://snapshot.debian.org/archive/debian/20261110T000000Z/ \
+      forky main \
       > /etc/apt/sources.list.d/forky.list \
  && apt-mark hold libc6 libc6-dev linux-libc-dev \
  && apt-get update \
@@ -70,7 +76,7 @@ RUN fingerprint=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421 \
  && rm -rf /var/lib/apt/lists/* \
  && ln -s clang-21 /usr/bin/clang
 
-ENV TYPEC_TEST_CLANG=/usr/bin/clang TYPEC_TEST_GCC=/usr/bin/gcc
+ENV TYPEC_TEST_CLANG=/usr/bin/clang TYPEC_TEST_GCC=/usr/bin/gcc-16
 
 RUN useradd --create-home typec
 USER typec
