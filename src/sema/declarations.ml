@@ -111,6 +111,7 @@ type t = {
   generics : (string, generic) Hashtbl.t;
   generic_definitions : (string, generic_definition) Hashtbl.t;
   applied_generics : (int, string) Hashtbl.t;
+  applied_at : Tree.span Ctype.Instances.t;
   instance_bytes : int;
   tag_max : Exact_integer.t;
   copy_bytes : int;
@@ -174,6 +175,19 @@ let applied_generic result index =
   Option.bind
     (Hashtbl.find_opt result.applied_generics index)
     (named_generic result)
+
+(* An instance over a type parameter, which the check of a generic
+   function's head applies outside a trial, is no instance of the unit:
+   no encoding of design 10.3 names it, and no text holds it. *)
+let applications result =
+  Ctype.Instances.bindings result.applied_at
+  |> List.filter (fun ((instance : Ctype.instance), _) ->
+         not instance.mentions_parameter)
+
+let instance_generic result (instance : Ctype.instance) =
+  match named_generic result (instance.generic :> string) with
+  | Some generic -> generic
+  | None -> invalid_arg "Declarations.instance_generic: no generic"
 
 let typed result = result.typed
 let instance_bytes result = result.instance_bytes
@@ -5172,14 +5186,14 @@ let read target ~product text (scopes : Parser.scopes) =
   match Fun.protect ~finally:end_deferral read_all with
   | items ->
       let { tags; entities; tag_types; linked; typed; type_declarations;
-            generics; generic_definitions; applied_generics; placements;
-            instance_bytes; copy_bytes; longest_instance_code;
+            generics; generic_definitions; applied_generics; applied_at;
+            placements; instance_bytes; copy_bytes; longest_instance_code;
             zero_initialisers; _ } =
         state
       in
       Ok { product; tags; items; placements; entities; tag_types; linked; typed;
            type_declarations; generics; generic_definitions;
-           applied_generics; instance_bytes; copy_bytes;
+           applied_generics; applied_at; instance_bytes; copy_bytes;
            longest_instance_code; zero_initialisers;
            tag_max = int_max target }
   | exception (Failed error | Instance_failed error | Over_budget error) ->

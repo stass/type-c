@@ -190,6 +190,18 @@ val applied_generic : t -> int -> generic_definition option
     of a generic type, as {!latest_generic} gives it, or the definition
     of a generic function; [None] where no application begins. *)
 
+val applications : t -> (Ctype.instance * Tree.span) list
+(** Each instance that the unit's reading applied, wherever the
+    application stands: in the unit's own text, in an included file's,
+    or in a definition that the reading of an instance read; a reading
+    forgotten adds none, nor does an application that mentions a type
+    parameter. With each, its latest application, in the order of
+    {!Ctype.Instances}. *)
+
+val instance_generic : t -> Ctype.instance -> generic_definition
+(** [instance_generic result instance] is the generic of an instance
+    that the unit applied, as {!applied_generic} gives it. *)
+
 val type_declarations : t -> Tree.type_declaration list
 (** The type declarations that the reader has read, in source order:
     those that lowering replaces (design 13.5). *)

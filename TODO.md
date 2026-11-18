@@ -316,22 +316,13 @@ and the runs of the interface's own lowered text in macro brackets
 between its include lines, the definition of each instance under its
 guard where a point needs it complete, and at its end that of each
 other instance that its own applications name where the definition
-reads there, the layout typedef of each instance that it declares
-whose generic the step reads defined, the packing probe named for the
-header, under `--trap-function` the trap's prototype and its
+reads there, the layout typedef of each instance that its step
+applies whose generic the step reads defined, the packing probe named
+for the header, under `--trap-function` the trap's prototype and its
 definition under the guard of the trap function, and under the
 dependency options the rule of the header (design 9.3). The rest of
 the package, in the order of its commits:
 
-- [Medium] A layout digest follows the applications of generics in a
-  definition but not a typedef name or a tag that it names: with
-  `typedef inner(int) inner_int;` or `struct holder { inner(long) x; }`
-  in a shared `outer.tci` and `outer(T) = struct { inner_int i; }`, two
-  libraries that define `inner` apart write one digest for
-  `outer(struct op)`, and only `outer.h` writes a layout typedef for
-  `inner(int)`. A header that writes the layout typedef of every
-  instance that its step reads, not only those that it declares, may
-  close it (design 9.3, section 14).
 - [Medium] `Layout.definition_text` walks the closure again for every
   instance, so a header of M instances over a chain of N generics costs
   N times M; memoise it per generic and charge the spelt bytes to a

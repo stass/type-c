@@ -2406,23 +2406,6 @@ let definition_text context instance pieces : Emitter.bracketed_text =
       Guarded
         { instance = Typec_sema.Encoding.instance_c_name instance; pieces }
 
-(* A header declares each instance with its layout typedef, where its
-   step reads the generic defined (design 9.3); a C unit writes none. *)
-let layout_typedef context location instance generic =
-  let output = context.output in
-  let declarations = context.declarations in
-  match Typec_sema.Declarations.product declarations with
-  | Unit_text -> []
-  | Header_text -> (
-      match
-        Layout.definition_text declarations (Emitter.unit output) generic
-      with
-      | None -> []
-      | Some definition ->
-          let name = Typec_sema.Encoding.instance_c_name instance in
-          let typedef = Layout.typedef name ~definition in
-          [ Emitter.generated output location typedef ])
-
 let placement_text context (placement : Typec_sema.Declarations.placement) :
     Emitter.bracketed_text =
   let location = application_location context placement in
@@ -2431,17 +2414,10 @@ let placement_text context (placement : Typec_sema.Declarations.placement) :
   | Typedefs typedefs ->
       Unguarded (argument_typedefs context location typedefs)
   | Declared { generic } ->
-      let latest =
-        Typec_sema.Declarations.latest_generic context.declarations generic
-      in
-      Unguarded
-        (instance_declaration context location instance generic
-        @ layout_typedef context location instance (Type_generic latest))
+      Unguarded (instance_declaration context location instance generic)
   | Prototype ->
-      let ((_, reading) as definition) = function_definition context instance in
-      Unguarded
-        (function_prototype context location instance definition
-        @ layout_typedef context location instance reading.generic)
+      let definition = function_definition context instance in
+      Unguarded (function_prototype context location instance definition)
   | Defined ->
       definition_text context placement.instance
         (instance_rest context location placement.instance)
@@ -2529,9 +2505,33 @@ let edits (text : Reader.t) ~trap declarations =
     declarations;
   Emitter.limited text ~trap (fun output -> all_edits output declarations)
 
+(* A header writes the layout typedef of every instance that its step
+   applied, wherever the application stands, where the step reads the
+   generic defined (design 9.3), so that an instance that a typedef
+   name or a tag of an included interface holds is covered too. Each is
+   charged to the output limit at its latest application. *)
+let layout_typedefs output declarations =
+  let module Declarations = Typec_sema.Declarations in
+  let unit = Emitter.unit output in
+  let typedef (instance, (application : Tree.span)) =
+    let generic = Declarations.instance_generic declarations instance in
+    match Layout.definition_text declarations unit generic with
+    | None -> None
+    | Some definition ->
+        let name = Typec_sema.Encoding.instance_c_name instance in
+        let location = (tokens_of output).(application.first).location in
+        let text = Layout.typedef name ~definition in
+        Some (Emitter.generated output location text)
+  in
+  List.filter_map typedef (Declarations.applications declarations)
+
 let lowered_header output ~target ~header_module declarations =
+  (* The edits first, so that the output limit refuses the earliest
+     text that passes it, as for a unit. *)
+  let edits = all_edits output declarations in
   Emitter.header_text output ~target ~header_module
-    (all_edits output declarations)
+    ~layouts:(layout_typedefs output declarations)
+    edits
 
 let header_text (text : Reader.t) ~target ~trap ~header_module declarations
     =

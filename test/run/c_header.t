@@ -573,6 +573,113 @@ together.
   >   done
   > done
 
+The digest follows no typedef name and no tag that a definition names,
+but every header writes the layout typedef of each instance that its
+step reads, so an inner instance that a typedef name or a structure of
+a shared interface holds is pinned by each header that reads it. Over
+lib1's and lib2's inner, a client that includes the headers of two
+interfaces that pass such an outer instance alone fails to compile on
+the inner instance's layout typedef; over one inner they compile
+together.
+
+  $ cat > typedef.tci <<'EOF'
+  > #ifndef TYPEDEF_TCI
+  > #define TYPEDEF_TCI
+  > #include "inner.tci"
+  > typedef inner(int) inner_int;
+  > type named(T) = struct { inner_int i; T *v; };
+  > #endif
+  > EOF
+  $ cat > tag.tci <<'EOF'
+  > #ifndef TAG_TCI
+  > #define TAG_TCI
+  > #include "inner.tci"
+  > struct holder { inner(long) x; };
+  > type tagged(T) = struct { struct holder h; T *v; };
+  > #endif
+  > EOF
+  $ compile_pair() {
+  >   "$1" -std=$2 $strict -I lib1 -DFIRST="\"${form}1.h\"" \
+  >     -DSECOND="\"${form}2.h\"" -c clash.c -o clash.o
+  > }
+  $ shared() {
+  >   form=$1 generic=$2 inner=$3
+  >   for side in 1 2; do
+  >     printf '#include "%s.tci"\nstruct op;\n' $form > $form$side.tci
+  >     printf 'void %s_take(%s(struct op) *p);\n' $form$side $generic \
+  >       >> $form$side.tci
+  >   done
+  >   typec --emit-c-header -I lib1 $form.tci
+  >   typec --emit-c-header -I lib1 ${form}1.tci
+  >   typec --emit-c-header -I lib2 ${form}2.tci
+  >   for cc in "$clang" "$gcc"; do
+  >     for std in c11 gnu17; do
+  >       compile_pair "$cc" $std 2>&1 | grep -A1 'error:' |
+  >         grep -q "__tc_layout__$inner" && echo "refused $form"
+  >     done
+  >   done
+  >   typec --emit-c-header -I lib1 ${form}2.tci
+  >   for cc in "$clang" "$gcc"; do
+  >     for std in c11 gnu17; do
+  >       compile_pair "$cc" $std || echo "failed: $form $cc $std"
+  >     done
+  >   done
+  > }
+  $ shared typedef named inner__i
+  refused typedef
+  refused typedef
+  refused typedef
+  refused typedef
+  $ shared tag tagged inner__l
+  refused tag
+  refused tag
+  refused tag
+  refused tag
+
+An instance whose generic applies one that a step reads declared alone
+has no layout typedef in that step's header, as one whose own generic
+is declared alone: the step defines it only where the other generic
+stands behind a pointer. So an interface that declares a generic
+alone, one that completes it and one that applies an instance through
+a typedef name are included together.
+
+  $ mkdir forward
+  $ cat > forward/api.tci <<'EOF'
+  > #ifndef API_TCI
+  > #define API_TCI
+  > type part(T);
+  > type whole(T) = struct { part(T) *p; int n; };
+  > #endif
+  > EOF
+  $ cat > forward/impl.tci <<'EOF'
+  > #ifndef IMPL_TCI
+  > #define IMPL_TCI
+  > #include "api.tci"
+  > type part(T) = | Leaf(T v);
+  > #endif
+  > EOF
+  $ cat > forward/alias.tci <<'EOF'
+  > #ifndef ALIAS_TCI
+  > #define ALIAS_TCI
+  > #include "api.tci"
+  > typedef whole(int) whole_int;
+  > #endif
+  > EOF
+  $ cat > forward/user.tci <<'EOF'
+  > #include "impl.tci"
+  > #include "alias.tci"
+  > int user_size(whole_int *w);
+  > EOF
+  $ (cd forward && for name in api impl alias user; do
+  >   typec --emit-c-header $name.tci
+  > done)
+  $ for cc in "$clang" "$gcc"; do
+  >   for std in c11 gnu17; do
+  >     "$cc" -std=$std $strict -I forward -DFIRST='"alias.h"' \
+  >       -DSECOND='"user.h"' -c clash.c -o clash.o || echo "failed: $cc $std"
+  >   done
+  > done
+
 A header defines at its end, each under its guard, the instances that
 its interface names and that no point of it needed complete, where
 their definitions find complete what they need, so a client may use by

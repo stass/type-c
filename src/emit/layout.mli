@@ -19,13 +19,12 @@ val definition_text :
     of [generic] in [unit], then that of each generic that it applies,
     transitively, each once, in the order in which their applications
     first stand, so that the text names the whole layout that the
-    definition depends on; a generic declared and not defined (design
-    3.1 rule 4) adds its declaration. A definition is each of its
-    tokens as {!Typec_cpp.Reader.spelling} spells it, followed by one
-    space, so that neither the white space between the tokens nor the
-    spelling of an identifier by universal character names changes it,
-    and then a line break. [None] where [generic] itself is declared
-    and not defined, which has no definition to digest. *)
+    definition depends on. A definition is each of its tokens as
+    {!Typec_cpp.Reader.spelling} spells it, followed by one space, so
+    that neither the white space between the tokens nor the spelling of
+    an identifier by universal character names changes it, and then a
+    line break. [None] where [generic] or a generic that it applies,
+    transitively, is declared and not defined (design 3.1 rule 4). *)
 
 val typedef : Typec_syntax.Spelling.c_name -> definition:string -> string
 (** [typedef instance ~definition] is the layout typedef of [instance]

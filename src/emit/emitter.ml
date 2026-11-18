@@ -586,7 +586,7 @@ let header_trap_lines output =
    enumerations rests on it (design 9.3). Their names are the header's,
    as a client may include several.
    Reader.rewrite checks that the ranges do not overlap. *)
-let header_text output ~target ~header_module edits =
+let header_text output ~target ~header_module ~layouts edits =
   force_moved output;
   let unit = output.unit in
   let edits = in_order edits in
@@ -598,6 +598,7 @@ let header_text output ~target ~header_module edits =
        ~first:(first_main_token unit.tokens) edits)
   ^ assertion_block
       (definition
+      @ List.map (fun (layout : piece) -> layout.text) layouts
       @ Assumptions.enumeration target ~suffix
       @ probes ~suffix edits)
 

@@ -260,10 +260,10 @@ let header_guards () =
   compares "the guarded definition of an instance in a header"
     (words (header_text source))
     "#pragma pack(push) #pragma pack() typedef int __tc_arg__i; struct \
-     box__i; typedef struct box__i box__i; typedef struct \
-     __tc_digest__8b8a165ff9bcddb25642b82d823d3a9c *__tc_layout__box__i; \
+     box__i; typedef struct box__i box__i; \
      #ifndef __tc_instance__box__i struct box__i { __tc_arg__i value ; } ; \
-     #endif #pragma pack(pop) struct s { box__i b; }; \
+     #endif #pragma pack(pop) struct s { box__i b; }; typedef struct \
+     __tc_digest__8b8a165ff9bcddb25642b82d823d3a9c *__tc_layout__box__i; \
      enum __tc_enum_probe__m { __tc_enum_probe__m }; \
      _Static_assert(_Generic((enum __tc_enum_probe__m)0, unsigned int: 1, \
      default: 0), \"typec assumes int-sized enumerations: an \
@@ -285,12 +285,10 @@ let header_guards () =
     "false"
 
 (* The layout typedefs (design 9.3) that the header text of [source]
-   declares, each with its semicolon. *)
+   declares, each a line of its own at the header's end. *)
 let layout_lines source =
-  String.split_on_char ';' (words (header_text source))
-  |> List.map String.trim
+  String.split_on_char '\n' (header_text source)
   |> List.filter (String.starts_with ~prefix:"typedef struct __tc_digest__")
-  |> List.map (fun typedef -> typedef ^ ";")
   |> String.concat " "
 
 (* The name of the instance of [generic] whose argument encodings are
@@ -391,8 +389,8 @@ let transitive_layouts () =
          type node(T) = | Leaf(T v) | Branch(tree(T) *t);\n"
        ^ declare "tree"))
     (String.concat " "
-       [ Layout.typedef (of_op "tree") ~definition:(tree ^ node);
-         Layout.typedef (of_op "node") ~definition:(node ^ tree) ]);
+       [ Layout.typedef (of_op "node") ~definition:(node ^ tree);
+         Layout.typedef (of_op "tree") ~definition:(tree ^ node) ]);
   compares "a generic that two applied generics apply, once"
     (layout_lines
        ("type base(T) = struct { T v; };\n\
@@ -406,11 +404,15 @@ let transitive_layouts () =
           type left ( T ) = struct { base ( T ) b ; } ; \n\
           type base ( T ) = struct { T v ; } ; \n\
           type right ( T ) = struct { base ( T ) b ; } ; \n");
-  compares "an applied generic declared alone adds its declaration"
+  compares "an applied generic declared alone leaves none"
     (layout_lines
        ("type node(T);\ntype tree(T) = struct { node(T) *root; };\n"
        ^ declare "tree"))
-    (Layout.typedef (of_op "tree") ~definition:(tree ^ "type node ( T ) ; \n"));
+    "";
+  compares "an instance over a generic function's type parameter has none"
+    (layout_lines
+       "type box(T) = struct { T v; };\ngeneric(T) T unbox(box(T) *b);\n")
+    "";
   compares "a member that a generic's name spells adds nothing"
     (layout_lines
        ("type len(T);\ntype vec(T) = struct { T *data; int len; };\n\
@@ -424,12 +426,12 @@ let transitive_layouts () =
         generic(T) T twice(T v) { return same(v); }\n\
         static inline int four(void) { return twice(2); }\n")
     (String.concat " "
-       [ Layout.typedef (instance_of "twice" [ "i" ])
+       [ Layout.typedef (instance_of "same" [ "i" ])
+           ~definition:"generic ( T ) T same ( T v ) { return v ; } \n";
+         Layout.typedef (instance_of "twice" [ "i" ])
            ~definition:
              "generic ( T ) T twice ( T v ) { return same ( v ) ; } \n\
-              generic ( T ) T same ( T v ) { return v ; } \n";
-         Layout.typedef (instance_of "same" [ "i" ])
-           ~definition:"generic ( T ) T same ( T v ) { return v ; } \n" ])
+              generic ( T ) T same ( T v ) { return v ; } \n" ])
 
 (* The words of [text] from the first [first] to the [last] after it,
    inclusive; empty where either is missing. *)

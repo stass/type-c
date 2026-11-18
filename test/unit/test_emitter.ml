@@ -718,7 +718,7 @@ let () =
   let anchor = Tree.anchor (List.nth (declarations unit) 2) in
   let text =
     made unit (fun output ->
-        Emitter.header_text output ~target:lp64 ~header_module:"m"
+        Emitter.header_text output ~target:lp64 ~header_module:"m" ~layouts:[]
           [ Emitter.bracketed output ~at:anchor ~location:(at 2)
               [ Guarded
                   { instance = c_name "s";
@@ -751,7 +751,7 @@ let () =
   let header trap ~calls =
     let lowered output =
       let code = if calls then Emitter.trap_call output ^ ";" else ";" in
-      Emitter.header_text output ~target:lp64 ~header_module:"m"
+      Emitter.header_text output ~target:lp64 ~header_module:"m" ~layouts:[]
         [ Emitter.code output (Reader.range unit.tokens ~first:0 ~count:0)
             ~location:(at 1) code ]
     in
