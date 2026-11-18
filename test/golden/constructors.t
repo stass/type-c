@@ -234,29 +234,28 @@ name is undeclared.
   $ ./golden.exe out_of_scope.tc
   out_of_scope.tc:5: error: 'NoMemory' is not declared (C11 6.5.1p2)
   [1]
+  $ cat > c_text_own.tc <<'EOF'
+  > type e3 = | Missing;
+  > # 1 "c.h" 1
+  > static int h(void) { return Missing; }
+  > EOF
+  $ ./golden.exe c_text_own.tc
+  c.h:1: error: 'Missing' is not declared (C11 6.5.1p2); as a constructor of 'e3' it is written only in a Type-C file, a .tc or .tci
+  [1]
 
-A name that is not declared and is a few edits from one constructor in
-scope is suggested as that constructor; one as close to two, or too
-short to say which was meant, is not.
+A name that is not declared is suggested as no constructor, even one a
+few edits away, as a nearer name of another declaration may be meant.
 
   $ cat > misspelt.tc <<'EOF'
   > type shape = | Circle(double r) | Rect(double w, double h);
   > shape f(void) { return Circel(1.0); }
   > EOF
   $ ./golden.exe misspelt.tc
-  misspelt.tc:2: error: 'Circel' is not declared (C11 6.5.1p2); did you mean the constructor 'Circle' of 'shape'?
+  misspelt.tc:2: error: 'Circel' is not declared (C11 6.5.1p2)
   [1]
   $ printf 'option(int) g(void) { return Smoe(1); }\n' > misspelt_universe.tc
   $ ./golden.exe misspelt_universe.tc
-  misspelt_universe.tc:1: error: 'Smoe' is not declared (C11 6.5.1p2); did you mean the constructor 'Some' of 'option(T)'?
-  [1]
-  $ printf 'type pet = | Cat | Car;\npet f(void) { return Cab; }\n' > misspelt_tie.tc
-  $ ./golden.exe misspelt_tie.tc
-  misspelt_tie.tc:2: error: 'Cab' is not declared (C11 6.5.1p2)
-  [1]
-  $ printf 'type e = | A | B;\nint f(void) { return x; }\n' > misspelt_short.tc
-  $ ./golden.exe misspelt_short.tc
-  misspelt_short.tc:2: error: 'x' is not declared (C11 6.5.1p2)
+  misspelt_universe.tc:1: error: 'Smoe' is not declared (C11 6.5.1p2)
   [1]
   $ cat > misspelt_inner.tc <<'EOF'
   > type s1 = | Circle(double r);
@@ -266,12 +265,18 @@ short to say which was meant, is not.
   > }
   > EOF
   $ ./golden.exe misspelt_inner.tc
-  misspelt_inner.tc:4: error: 'Circel' is not declared (C11 6.5.1p2); did you mean the constructor 'Circle' of 's2'?
+  misspelt_inner.tc:4: error: 'Circel' is not declared (C11 6.5.1p2)
   [1]
   $ printf 'type e4 = | Circle;\n# 1 "c.h" 1\nstatic int h(void) { return Circel; }\n' > misspelt_c_text.tc
   $ ./golden.exe misspelt_c_text.tc
   c.h:1: error: 'Circel' is not declared (C11 6.5.1p2)
   [1]
+
+A constructor that its variant lacks, after the variant or in a
+pattern, is suggested as the one constructor of that variant a few
+edits from it; one as close to two, or too short to say which was
+meant, is not.
+
   $ printf 'type shape = | Circle(double r);\nshape s = shape.Circel(1.0);\n' > misspelt_qualified.tc
   $ ./golden.exe misspelt_qualified.tc
   misspelt_qualified.tc:2: error: the variant 'shape' has no constructor 'Circel'; did you mean 'Circle'? [constructor-expression]
@@ -288,13 +293,13 @@ short to say which was meant, is not.
   $ ./golden.exe misspelt_pattern.tc
   misspelt_pattern.tc:4: error: 'Circel' names no constructor of the variant 'shape'; did you mean 'Circle'? [match-pattern]
   [1]
-  $ cat > c_text_own.tc <<'EOF'
-  > type e3 = | Missing;
-  > # 1 "c.h" 1
-  > static int h(void) { return Missing; }
-  > EOF
-  $ ./golden.exe c_text_own.tc
-  c.h:1: error: 'Missing' is not declared (C11 6.5.1p2); as a constructor of 'e3' it is written only in a Type-C file, a .tc or .tci
+  $ printf 'type pet = | Cat | Car;\npet p = pet.Cab;\n' > misspelt_tie.tc
+  $ ./golden.exe misspelt_tie.tc
+  misspelt_tie.tc:2: error: the variant 'pet' has no constructor 'Cab' [constructor-expression]
+  [1]
+  $ printf 'type e = | A;\ne v = e.B;\n' > misspelt_short.tc
+  $ ./golden.exe misspelt_short.tc
+  misspelt_short.tc:2: error: the variant 'e' has no constructor 'B' [constructor-expression]
   [1]
 
 A constructor is no function, so its name in parentheses is not called.
