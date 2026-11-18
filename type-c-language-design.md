@@ -5584,7 +5584,7 @@ language is defined here and not by the tool.
   (a compile server) runs later; and a hop that clears the environment,
   such as `env -i` or `sudo`, still loops. No use of a nested `typec` is
   known, so neither cost is worth more mechanism.
-- *Provisional (P15).* The backend preprocesses: `typec` runs it with
+- *Decided (P15).* The backend preprocesses: `typec` runs it with
   `-E -dD -x c` and the user's options, parses the result, and compiles
   its own output with `-x cpp-output`. Macros are expanded once, by the
   compiler that compiles the result, so the two cannot disagree, but
@@ -8899,11 +8899,11 @@ with the scripts that reproduce them (`make size-split`,
 | P12 | Instances are per translation unit (7.3) | Plan, "Measurements of 3.6": the text of the benchmark program at `-O2` is 5192 bytes against 4920 for C with its functions defined once and 4568 with them `static inline` on Clang 21, and 4428 against 4523 and 3950 on GCC 16, within 6% of the external functions; at `-O0` 7113 against 5369 and 5785, and 7556 against 5447 and 5842. The Type-C side holds three functions that the twins leave out. `typec -c` of a unit takes 0.18 to 0.45 s against 0.06 to 0.25 s for `cc -c` of a C unit | **Decided:** per unit |
 | P13 | A string literal becomes `str` by target type (8) | A port of the string handling of Pilot B to `str`: 75 literals became `str` by their target type and none needed a cast or a wrapper; 21 stayed `char *` where a C string is meant (19 `printf` formats, `strchr`, `xstrdup`); no reading surprised, and 31 edge probes behave as this section says; the tests pass on Clang and GCC 16 at `-O0` and `-O2` (`measure/p13/2026-11-17-darwin-x86_64/RESULTS.md` in the data repository, commit `e7b60ce`) | **Decided:** as specified |
 | P14 | Slice checks cannot be turned off (8) | Plan, "Measurements of 3.6": the checked and the unchecked sum take 1.24 and 1.29 ms on Clang and 3.55 and 3.56 on GCC 16 at `-O2` for 10^4 elements (1.50 and 1.52, 3.46 and 3.43 for 10^6), the same within noise; at `-O0` 20.0 and 17.4 ms on Clang (+15%) and 21.3 and 17.3 on GCC 16 (+23%), a cost that does not justify an unsafe mode | **Decided:** always on |
-| P15 | The backend preprocesses (13.2) | Stage 4 review of diagnostic quality | Backend preprocesses |
+| P15 | The backend preprocesses (13.2) | Stage 4 review of diagnostic quality: line-granular locations served the three pilots, and Pilot C met no diagnostic hard to act on; a column cannot be recovered from the `-E` text cheaply or correctly, and no backend keeps the spacing that would carry one, so a preprocessor of its own would buy columns alone, at the cost of a C preprocessor to keep in step with two compiler families. A diagnostic prints its source line instead (review at `/Volumes/Optaine/diag-review/review.md`, "Columns") | **Decided:** backend preprocesses |
 | P16 | The front end computes no aggregate layout (13.3) | Stage 0 corpus: constructs that need a layout value | No layout |
 | P17 | The tier 1 rule set (11.2) | Stage 5 prototype on pilot code | Tier 1 is not released until the rules pass |
 | P18 | Lifetimes by homogeneous regions (11.3) | Stage 6: a formal model, then a prototype | No lifetime tier |
-| P19 | `typec` has a C front end of its own (13.1) | Stage 0 gate and its change-of-course condition | Own front end |
+| P19 | `typec` has a C front end of its own (13.1) | Stage 0 gate and its change-of-course condition: the gate passed and the condition did not arise | **Decided:** own front end |
 | P20 | `__builtin_va_list` is an opaque type (13.3) | Typing `__builtin_va_arg` and bodies (0.9b, 0.7b): a case that needs the representation | Opaque |
 | P21 | A type that the front end does not compute is unknown, an error only where it is needed (13.3) | Typing bodies (0.9b) and the corpus: points that need an unknown type's properties, the declarations that the resolution check of 13.5 refuses for one among them, read from the one code that such a refusal carries for every kind of moved text | Unknown types stay |
 | P22 | `typec`'s own failures exit with 80, 81 and 82, which no backend uses (13.2) | Corpus runs with GCC and Clang: a backend failure that exits with one of them | As specified |
