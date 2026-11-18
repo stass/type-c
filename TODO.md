@@ -1480,6 +1480,29 @@ the package, in the order of its commits:
 (musl) in containers, each on x86-64 and on arm64 (the latter under
 emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
 
+- [High] macOS on arm64, a platform of release 1.0, has never run the
+  gate. Run it natively as docs/development.md, "Running on Apple
+  Silicon", says. Only that run can confirm these:
+  * Homebrew's GCC 16 for arm64 links `-fsanitize=address,undefined`,
+    which `defer.t`, `slices.t`, `nested_tests.t`, `nested_patterns.t`,
+    `slice_lowering.t`, `try_expressions.t` and `containers.t` use.
+  * That GCC reports the facts of `target.t`'s `Darwin arm64` entry as
+    Apple's Clang does (signed plain char, 8-byte `long double`,
+    `wchar_t` int, no `__float128`), and has every optional floating
+    type the test expects, `_Float64x` and `_Float128` included.
+  * The trap of a checked index stops lldb at the line of the check
+    with both backends, as the lldb examples of `docs/tutorial.md`
+    need.
+  * The objects of GCC and Apple's Clang link together under the arm64
+    calling convention, variadic calls included (`abi.t`,
+    `c_header.t`).
+  * `arm-none-eabi-gcc` from Homebrew runs the Arm tests.
+  * The OCaml runtime on macOS arm64 behaves as on Linux arm64 in
+    `test_small_stack` and `test_deep_trees`.
+  The emitted C and the target query were checked for arm64 macOS from
+  an Intel Mac, with `clang -arch arm64`, which cannot run what it
+  builds.
+
 - [Medium] No Linux host runs GCC 14, the oldest GCC that typec
   supports: the Debian hosts test GCC 16 and Alpine has GCC 15, so only
   FreeBSD over ssh (x86-64) runs it, with no arm64 or glibc run. Add a
@@ -1698,10 +1721,10 @@ types (design 13.3).
   Clang writes a node's range before its children. A field with each
   record's depth among the expressions would state it.
 - [Low] test/run/target.t keys the expected plain-char signedness,
-  wchar_t and __float128 on `uname -m` (x86_64, amd64, aarch64), a hand
-  list that each new host spelling extends; take the expectations from
-  the backend's own macros (__CHAR_UNSIGNED__, __WCHAR_TYPE__,
-  __SIZEOF_FLOAT128__) instead.
+  long double size, wchar_t and __float128 on `uname -sm` (x86-64, Linux
+  aarch64, Darwin arm64), a hand list that each new host extends; take
+  the expectations from the backend's own macros (__CHAR_UNSIGNED__,
+  __SIZEOF_LONG_DOUBLE__, __WCHAR_TYPE__, __SIZEOF_FLOAT128__) instead.
 
 ## Language reference
 

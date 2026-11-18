@@ -456,7 +456,8 @@ status 80 and one message, before anything is emitted or compiled.
 
 The target model comes from the backend with the options of the compile
 step, so -funsigned-char reaches the declarations. Plain char is signed
-by default on x86-64 and not on arm64, so the first compile asks for it.
+by default on x86-64 and arm64 macOS and not on arm64 Linux, so the first
+compile asks for it.
 
   $ printf 'int a[(char)-1 < 0 ? 1 : -1];\n' > signed-char.tc
   $ typec --cc=$clang -fsigned-char --emit-c signed-char.tc -o out/signed-char.i

@@ -1541,11 +1541,12 @@ Requirements: OCaml 5.4 and dune 3; the tests also need a C compiler as
 [Choosing the backend](#choosing-the-backend)), and `tools/corpus/runner.t` runs
 `/usr/bin/clang`. The cram tests in `test/run` run the Clang that
 `TYPEC_TEST_CLANG` names and the GCC that `TYPEC_TEST_GCC` names; unset,
-they are `/usr/bin/clang` and `/usr/local/bin/gcc-16`, those of the
-macOS development host (`test/run/backends.sh`). `headers.t` parses
+they are `/usr/bin/clang` and the `gcc-16` on the `PATH`, those of a
+macOS host with Homebrew's GCC (`test/run/backends.sh`). `headers.t` parses
 and reads the declarations of every C11 and POSIX header that each
 backend's system headers hold.
-`target.t` expects the model of x86-64 or of arm64, both Linux, and
+`target.t` expects the model of x86-64, of arm64 Linux or of arm64
+macOS, and
 `types.t`, `declarations.t` and `expressions.t` compile for the host's target and
 for a second one, `-m32` on x86-64 and the other signedness of plain
 char elsewhere (`second_target` in `test/run/backends.sh`). A host

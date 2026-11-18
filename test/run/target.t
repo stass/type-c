@@ -3,12 +3,13 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 typec --print-target prints the target model that the backend reports in
 its predefined macros when it is run with the other arguments as options.
-The backends are those that backends.sh names, on an x86-64 or arm64
-Linux host. Their release varies with the host, and so do the optional
-floating types of Clang and uint64_t, which are left out here:
-uint64_t is unsigned long long on macOS. The architecture, the signedness
-of plain char and the type of wchar_t follow the host, and so does
-__float128, which is x86-64 alone; they are checked on their own below.
+The backends are those that backends.sh names, on an x86-64 host or an
+arm64 Linux or macOS host. Their release varies with the host, and so do
+the optional floating types of Clang and uint64_t, which are left out
+here: uint64_t is unsigned long long on macOS. The architecture, the
+signedness of plain char, the size of long double and the type of
+wchar_t follow the host, and so does __float128, which is x86-64 alone;
+they are checked on their own below.
 
   $ unset TYPEC_CC
   $ . ./backends.sh
@@ -16,7 +17,7 @@ __float128, which is x86-64 alone; they are checked on their own below.
   $ typec --cc=$clang --print-target |
   >   sed -e '1s/ [0-9]*$//' -e '/^optional_floats:/d' \
   >     -e '/^uint64_type:/d' -e '/^architecture:/d' -e '/^char_signed:/d' \
-  >     -e '/^wchar_type:/d'
+  >     -e '/^sizeof_long_double:/d' -e '/^wchar_type:/d'
   backend: Clang
   char_bit: 8
   sizeof_short: 2
@@ -26,7 +27,6 @@ __float128, which is x86-64 alone; they are checked on their own below.
   sizeof_pointer: 8
   sizeof_float: 4
   sizeof_double: 8
-  sizeof_long_double: 16
   sizeof_int128: 16
   size_type: unsigned long
   ptrdiff_type: long
@@ -41,21 +41,26 @@ __float128, which is x86-64 alone; they are checked on their own below.
   stdc_version: 201710
   enum_representation: int-sized
 
-Plain char is signed on x86-64 and unsigned on arm64 Linux, where wchar_t
-is unsigned int, not int. GCC spells the types in another order and reads
-the same target.
+Plain char is signed on x86-64 and on arm64 macOS, and unsigned on arm64
+Linux, where wchar_t is unsigned int, not int. long double is 8 bytes,
+the format of double, on arm64 macOS, and 16 bytes elsewhere: the 80-bit
+format of x87 padded on x86-64, binary128 on arm64 Linux. arch_facts
+holds one line per fact. GCC spells the types in another order and
+reads the same target.
 
-  $ case $(uname -m) in
-  >   x86_64|amd64) architecture=x86 char_signed=true wchar_type=int
-  >     float128=1 ;;
-  >   aarch64) architecture=AArch64 char_signed=false
-  >     wchar_type="unsigned int" float128=0 ;;
-  >   *) echo "no expected model for $(uname -m)" ;;
+  $ case $(uname -sm) in
+  >   *" x86_64" | *" amd64") architecture=x86 char_signed=true
+  >     long_double=16 wchar_type=int float128=1 ;;
+  >   "Linux aarch64") architecture=AArch64 char_signed=false
+  >     long_double=16 wchar_type="unsigned int" float128=0 ;;
+  >   "Darwin arm64") architecture=AArch64 char_signed=true
+  >     long_double=8 wchar_type=int float128=0 ;;
+  >   *) echo "no expected model for $(uname -sm)" ;;
   > esac
-  $ printf 'architecture: %s\nchar_signed: %s\nwchar_type: %s\n' \
-  >   $architecture $char_signed "$wchar_type" > arch_facts
+  $ printf '%s: %s\n' architecture $architecture char_signed $char_signed \
+  >   sizeof_long_double $long_double wchar_type "$wchar_type" > arch_facts
   $ arch_lines() {
-  >   grep -E '^(architecture|char_signed|wchar_type):'
+  >   grep -E '^(architecture|char_signed|sizeof_long_double|wchar_type):'
   > }
   $ typec --cc=$clang --print-target | arch_lines | diff arch_facts -
   $ typec --cc=$gcc --print-target | arch_lines | diff arch_facts -

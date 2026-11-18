@@ -3,9 +3,11 @@
 
 # The backends that the cram tests run, sourced by each test that runs
 # one. TYPEC_TEST_CLANG and TYPEC_TEST_GCC name them; unset, they are
-# those of the macOS development host. A host that lacks a backend fails
-# the tests that run it. TYPEC_TEST_REQUIRE_M32, when set and not empty,
-# declares that the host must compile the C headers with -m32.
+# those of a macOS host: Apple's Clang and the gcc-16 on the PATH, which
+# Homebrew installs in /usr/local/bin on x86-64 and /opt/homebrew/bin on
+# arm64. A host that lacks a backend fails the tests that run it.
+# TYPEC_TEST_REQUIRE_M32, when set and not empty, declares that the host
+# must compile the C headers with -m32.
 # TYPEC_TEST_ARM_GCC names the arm-none-eabi-gcc of the Arm tests,
 # short_enums.t and c_header.t; unset, it is the one on the PATH.
 # TYPEC_TEST_REQUIRE_ARM, when set and not empty, declares that the host
@@ -14,7 +16,7 @@
 # examples of docs/tutorial.md that use it.
 
 clang=${TYPEC_TEST_CLANG:-/usr/bin/clang}
-gcc=${TYPEC_TEST_GCC:-/usr/local/bin/gcc-16}
+gcc=${TYPEC_TEST_GCC:-gcc-16}
 arm_gcc=${TYPEC_TEST_ARM_GCC:-arm-none-eabi-gcc}
 
 # The Arm backends of short_enums.t and c_header.t, each run where

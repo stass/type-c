@@ -138,6 +138,68 @@ the build tree and the build trees of the corpus stay between runs. To
 remove them all:
 `ssh USER@HOST "sh -c 'chmod -R u+w typec-host; rm -rf typec-host'"`.
 
+## Running on Apple Silicon
+
+`tools/gate.sh` runs natively on an Apple Silicon Mac as on an Intel
+one; provisionally, until a native run passes (`TODO.md`, "Test
+hosts"). Two things differ. Homebrew lives in `/opt/homebrew`, and the
+tests find its GCC as the `gcc-16` on the `PATH`, which must be the
+arm64 one: `brew shellenv` puts `/opt/homebrew/bin` first, but an x86
+Homebrew left in `/usr/local/bin` by a migration from an Intel Mac
+comes first in `/etc/paths`. The target differs
+too: plain char is signed, `long double` is the 8-byte `double`,
+`wchar_t` is `int`, and there is no `-m32`, so the tests that check a
+second target use the other signedness of plain char
+(`test/run/backends.sh`). `target.t` expects that model on
+`Darwin arm64`.
+
+Setting up, once: Apple's Clang and lldb come with the command line
+tools (`xcode-select --install`, unless installed), the rest from
+Homebrew, and the oracle's opam root goes anywhere outside the
+checkout. The blocks hold no comments, as zsh, the default shell,
+reads a `#` typed or pasted at its prompt as a word.
+
+```sh
+eval "$(/opt/homebrew/bin/brew shellenv)"
+brew install ocaml dune opam gcc cmake ninja arm-none-eabi-gcc
+command -v gcc-16
+export OPAMROOT=$HOME/typec-opam
+opam init --bare -n -y
+opam switch create tools --no-switch -y ocaml-base-compiler.5.5.2
+opam install --switch tools -y dune.3.24.2 yojson.3.0.0
+```
+
+`command -v gcc-16` must print `/opt/homebrew/bin/gcc-16`. The lldb
+examples of the tutorial need lldb to debug the test programs without
+an authorization prompt, which `sudo DevToolsSecurity -enable` turns
+off for every debugger until `sudo DevToolsSecurity -disable`. Without
+it, drop `TYPEC_TEST_REQUIRE_LLDB` below and the gate skips them.
+
+Running the gate from the checkout, with its log and the oracle's
+build in `$HOME/typec-gate`. The `TYPEC_TEST_REQUIRE_*` variables turn
+a skip of the Arm backends or of lldb into a failure. Without them the
+gate passes and only reports the skip. `tee` hides the gate's exit
+status: the gate passed when `gate.out` ends in `gate: passed`.
+
+```sh
+export OPAMROOT=$HOME/typec-opam
+out=$HOME/typec-gate
+mkdir -p "$out"
+ORACLE_BUILD=$out/_build GATE_LOG=$out/gate.log \
+  TYPEC_TEST_REQUIRE_ARM=1 TYPEC_TEST_REQUIRE_LLDB=1 \
+  tools/gate.sh 2>&1 | tee "$out/gate.out"
+{ uname -a; sw_vers; /usr/bin/clang --version
+  command -v gcc-16; gcc-16 -dumpmachine; gcc-16 --version
+  for cc in /usr/bin/clang gcc-16; do
+    _build/install/default/bin/typec --cc=$cc --print-target
+  done
+} > "$out/host.txt" 2>&1
+```
+
+What to send back: `gate.out`, `host.txt`, and, when a step failed,
+`gate.log`. A failing cram test shows in `gate.log` as a diff of the
+test file against its output.
+
 ## Fuzzing
 
 `tools/fuzz/` holds the fuzz harness: `fuzz.exe TARGET [FILE]` runs one
@@ -308,7 +370,7 @@ _build/default/tools/corpus/corpus.exe --corpus "$corpus" --cache "$cache" \
   --typec _build/install/default/bin/typec \
   --typec-revision "$(tools/corpus/revision.sh .)" \
   --corpus-revision "$(tools/corpus/revision.sh "$corpus")" \
-  --cc /usr/bin/clang --cc /usr/local/bin/gcc-16 \
+  --cc /usr/bin/clang --cc "$(command -v gcc-16)" \
   c-testsuite zlib lua sqlite chibicc qbe
 ```
 
@@ -433,11 +495,12 @@ is refused.
 
 `oracle.exe` reads JSON with yojson, which `typec` does not depend on,
 so it is built in an opam switch of its own, in the opam root of the
-fuzz harness. Setting up, once:
+fuzz harness. Setting up, once, with `opam init` left out when the root
+exists:
 
 ```sh
 export OPAMROOT=/Volumes/Optaine/opam
-opam init --bare --disable-sandboxing -n -y   # unless the root exists
+opam init --bare --disable-sandboxing -n -y
 opam switch create tools --no-switch -y ocaml-base-compiler.5.5.2
 opam install --switch tools -y dune.3.24.2 yojson.3.0.0
 ```
