@@ -394,7 +394,40 @@ goto in the same arm (4.3 rule 3).
   > }
   > EOF
   $ ./golden.exe open.tc
-  open.tc:6: error: the end of the match arm can be reached [match-arm-end]
+  open.tc:6: error: the arm of 'B(i)' can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
+  [1]
+
+A C fall-through into the next arm, and a last arm without its break,
+as a ported switch has them:
+
+  $ cat > fall.tc <<'EOF'
+  > type shape = | Circle(double r) | Square(double s) | Dot;
+  > int f(shape s) {
+  >   int k = 0;
+  >   match (s) {
+  >   case Circle(_): k = 1;
+  >   case Square(_): k = 2; break;
+  >   case Dot: break;
+  >   }
+  >   return k;
+  > }
+  > EOF
+  $ ./golden.exe fall.tc
+  fall.tc:5: error: the arm of 'Circle(_)' can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
+  [1]
+  $ cat > last.tc <<'EOF'
+  > type shape = | Circle(double r) | Square(double s) | Dot;
+  > int f(shape s) {
+  >   int k = 0;
+  >   match (s) {
+  >   case Circle(_): k = 1; break;
+  >   case Square(_): case Dot: k = 2;
+  >   }
+  >   return k;
+  > }
+  > EOF
+  $ ./golden.exe last.tc
+  last.tc:6: error: the arm of 'Square(_)' and 'Dot' can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
   [1]
 
 An item is reachable if it carries or contains a label (4.4), so the end
@@ -420,7 +453,7 @@ case label in a block that the switch around it jumps to.
   > }
   > EOF
   $ ./golden.exe contained.tc
-  contained.tc:4: error: the end of the match arm can be reached [match-arm-end]
+  contained.tc:4: error: the arm of 'A' can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
   [1]
 
   $ cat > section.tc <<'EOF'
@@ -443,7 +476,7 @@ case label in a block that the switch around it jumps to.
   > }
   > EOF
   $ ./golden.exe section.tc
-  section.tc:4: error: the end of the match arm can be reached [match-arm-end]
+  section.tc:4: error: the arm of 'A' can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
   [1]
 
 A label counts through a loop and a nested switch: a case label in a
@@ -472,7 +505,7 @@ default can complete.
   > }
   > EOF
   $ ./golden.exe duff.tc
-  duff.tc:4: error: the end of the match arm can be reached [match-arm-end]
+  duff.tc:4: error: the arm of 'A' can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
   [1]
 
   $ cat > nswnamed.tc <<'EOF'
@@ -490,7 +523,7 @@ default can complete.
   > }
   > EOF
   $ ./golden.exe nswnamed.tc
-  nswnamed.tc:4: error: the end of the match arm can be reached [match-arm-end]
+  nswnamed.tc:4: error: the arm of 'A' can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
   [1]
 
   $ cat > innerdefault.tc <<'EOF'
@@ -510,7 +543,7 @@ default can complete.
   > }
   > EOF
   $ ./golden.exe innerdefault.tc
-  innerdefault.tc:4: error: the end of the match arm can be reached [match-arm-end]
+  innerdefault.tc:4: error: the arm of 'A' can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
   [1]
 
 A case label of a switch, or any label in a match arm, inside an item
@@ -602,7 +635,7 @@ leaves the match in GCC, and the loop, and with it the arm, in Clang.
   > }
   > EOF
   $ ./golden.exe clang_ends.tc
-  clang_ends.tc:4: error: the end of the match arm can be reached [match-arm-end]
+  clang_ends.tc:4: error: the arm of 'A' can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
   [1]
 
 Here Clang leaves the inner loop for the return, and GCC the outer loop,
@@ -626,7 +659,7 @@ and with it the arm.
   > }
   > EOF
   $ ./golden.exe gcc_ends.tc
-  gcc_ends.tc:4: error: the end of the match arm can be reached [match-arm-end]
+  gcc_ends.tc:4: error: the arm of 'A' can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
   [1]
 
 An arm that ends unreachably on both readings stands, and so does such

@@ -245,7 +245,7 @@ gives -Wimplicit-fallthrough; Clang gives it only when asked.
   >   typec --cc="$cc" -Wall -Wextra -Werror -c cost.tc -o tc.o
   > done
   $ typec --cc=$clang -DMISSING_BREAK -c cost.tc -o tc.o
-  cost.tc:5: error: the end of the match arm can be reached [match-arm-end]
+  cost.tc:5: error: the arm of 'Load(_)' can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
   [80]
 
 4. A value of one distinct type used as another or as its

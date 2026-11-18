@@ -326,7 +326,7 @@ cost(op o)
 
 ```console
 $ typec -c cost.tc
-cost.tc:9: error: the end of the match arm can be reached [match-arm-end]
+cost.tc:9: error: the arm of 'Load(_)' can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
 [80]
 ```
 

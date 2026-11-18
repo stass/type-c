@@ -5824,10 +5824,15 @@ and reachability_facts context =
    every match that typing reads, and lowering emits, is checked. An arm
    is walked again for each arm around it, at most as many times as the
    parser's bound on nested brackets. *)
-and refuse_open_arm context arm =
-  match Reachability.arm_refusal (reachability_facts context) arm with
-  | Some { span; diagnostic } -> context.fail span diagnostic
-  | None -> ()
+and refuse_open_arm context (arm : Tree.arm) =
+  if Reachability.arm_end_reached (reachability_facts context) arm then
+    context.fail arm.span
+      (Rule.message Arm_end
+         (Printf.sprintf
+            "%s can reach its end; control does not fall out of an arm, so \
+             end it with break, return, continue or goto"
+            (listed ~one:"the arm of" ~several:"the arm of" ~more:0
+               (quoted_labels context arm))))
 
 (* 4.1 rule 1, 4.2 rule 4: a variant, whose qualifiers are ignored, and
    complete here, so that its constructors are known. [what] names the

@@ -81,9 +81,9 @@ val value_returns : defer_site list -> (Tree.span * Tree.span) list
     ({!Typec_syntax.Parser.max_depth}), so their recursion is bounded
     too. *)
 
-val arm_refusal : facts -> Tree.arm -> refusal option
-(** The breach of design 4.3 rule 1 by the arm, if its end can be
-    reached. Typing asks it of every match it reads. *)
+val arm_end_reached : facts -> Tree.arm -> bool
+(** Whether the end of the arm can be reached, which design 4.3 rule 1
+    refuses. Typing asks it of every match it reads. *)
 
 val label_refusal : Tree.block -> refusal option
 (** In the body of a function, the first jump, in source order, that

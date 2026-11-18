@@ -937,13 +937,8 @@ let start ~pairs facts =
     defers = Queue.create () }
 
 (* Design 4.3 rule 1. *)
-let arm_refusal facts (matched : Tree.arm) =
-  if (arm (start ~pairs:Ignored facts) matched).completes then
-    Some
-      { span = matched.span;
-        diagnostic =
-          Rule.message Arm_end "the end of the match arm can be reached" }
-  else None
+let arm_end_reached facts (matched : Tree.arm) =
+  (arm (start ~pairs:Ignored facts) matched).completes
 
 (* The labels and jumps that a walk records do not depend on the facts,
    which decide only whether a statement completes and which statements

@@ -76,13 +76,6 @@ The items are ordered by how often real code meets them.
   "...; make a slice with 'slice_unchecked(p, n)'". Source: probe; the
   first step of moving C's strings to `str` (Pilot B's string handling,
   Pilot C's `slice_unchecked` at every trust boundary).
-- [Medium] The end of a match arm can be reached: a ported `switch`
-  whose last case has no `break`, or a C fall-through, gives "the end of
-  the match arm can be reached [match-arm-end]", naming neither the arm
-  nor the fix. Proposed: "the arm of 'Triangle(_, _, _)' can reach its
-  end; end it with break, return, continue or goto, as control does not
-  fall into the next arm". Source: Pilot A (gate-6 injection, class 3;
-  9 upstream switches fell out to code after them); probe.
 - [Medium] A binding used where it is not in scope reads as an
   undeclared name: `r` after `if (case Circle(r) = s) ...;`, or `r` of
   the Circle arm used in the Square arm, gives "'r' is not declared

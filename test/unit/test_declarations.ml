@@ -1656,7 +1656,8 @@ let arm_termination () =
     in_function ("match (v) { case A: break; default: " ^ arm ^ " }")
   in
   let open_end =
-    "the end of the match arm can be reached [match-arm-end]"
+    "can reach its end; control does not fall out of an arm, so end it with \
+     break, return, continue or goto [match-arm-end]"
   in
   let refused arm = rejects ~file (ends arm) open_end in
   let accepted arm = accepts ~file (ends arm) in
