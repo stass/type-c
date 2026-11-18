@@ -112,11 +112,6 @@ let model_cases =
   [
     { name = "LP64"; dump = lp64_dump; expected = Ok lp64 };
     {
-      name = "ILP32, unsigned char";
-      dump = dump_of Canned_targets.ilp32_macros;
-      expected = Ok ilp32;
-    };
-    {
       name = "no final newline, empty lines";
       dump = "\n" ^ String.sub lp64_dump 0 (String.length lp64_dump - 1);
       expected = Ok lp64;
@@ -172,6 +167,16 @@ let model_cases =
       dump = dump_of (("__riscv", "1") :: without "__x86_64__");
       expected = Ok { lp64 with architecture = Other };
     };
+  ]
+
+(* Clang 21 for Arm, whose probe of __float128 fails. *)
+let ilp32_cases =
+  [
+    {
+      name = "ILP32, unsigned char";
+      dump = dump_of Canned_targets.ilp32_macros;
+      expected = Ok ilp32;
+    };
     {
       name = "uint32_t of unsigned long, as on arm-none-eabi";
       dump =
@@ -182,38 +187,60 @@ let model_cases =
     };
   ]
 
-(* The optional floating types follow their macros alone, as Clang 20 on
-   x86-64 Linux, Apple clang 21 and GCC 14 define them. *)
+(* The _FloatN and _FloatNx types follow their macros, as Clang 20 on
+   x86-64 Linux, Apple clang 21 and GCC 14 define them, and __float128
+   the answer of its probe alone, which comes first in each pair: GCC 16
+   for AArch64 macOS has it without __SIZEOF_FLOAT128__. *)
 let optional_float_cases =
   [
-    {
-      name = "Clang on x86-64 Linux: _Float16 and __float128";
-      dump =
-        lp64_dump_with_floats
-          [
-            ("__FLOAT128__", "1");
-            ("__FLT16_MANT_DIG__", "11");
-            ("__SIZEOF_FLOAT128__", "16");
-          ];
-      expected = Ok { lp64 with optional_floats = [ Float16; Gnu_float128 ] };
-    };
-    {
-      name = "Apple clang: _Float16 alone";
-      dump = lp64_dump_with_floats [ ("__FLT16_MANT_DIG__", "11") ];
-      expected = Ok { lp64 with optional_floats = [ Float16 ] };
-    };
-    {
-      name = "no optional floating type";
-      dump = lp64_dump_with_floats [];
-      expected = Ok { lp64 with optional_floats = [] };
-    };
-    {
-      name = "the order of Optional_float.all";
-      dump =
-        lp64_dump_with_floats
-          (List.rev Canned_targets.gcc_optional_float_macros);
-      expected = Ok lp64;
-    };
+    ( true,
+      {
+        name = "Clang on x86-64 Linux: _Float16 and __float128";
+        dump =
+          lp64_dump_with_floats
+            [
+              ("__FLOAT128__", "1");
+              ("__FLT16_MANT_DIG__", "11");
+              ("__SIZEOF_FLOAT128__", "16");
+            ];
+        expected =
+          Ok { lp64 with optional_floats = [ Float16; Gnu_float128 ] };
+      } );
+    ( false,
+      {
+        name = "Apple clang: _Float16 alone";
+        dump = lp64_dump_with_floats [ ("__FLT16_MANT_DIG__", "11") ];
+        expected = Ok { lp64 with optional_floats = [ Float16 ] };
+      } );
+    ( false,
+      {
+        name = "no optional floating type";
+        dump = lp64_dump_with_floats [];
+        expected = Ok { lp64 with optional_floats = [] };
+      } );
+    ( true,
+      {
+        name = "the order of Optional_float.all";
+        dump =
+          lp64_dump_with_floats
+            (List.rev Canned_targets.gcc_optional_float_macros);
+        expected = Ok lp64;
+      } );
+    ( true,
+      {
+        name = "GCC 16 on AArch64 macOS: __float128 without its macro";
+        dump =
+          lp64_dump_with_floats
+            (List.remove_assoc "__SIZEOF_FLOAT128__"
+               Canned_targets.gcc_optional_float_macros);
+        expected = Ok lp64;
+      } );
+    ( false,
+      {
+        name = "__SIZEOF_FLOAT128__ where the probe fails";
+        dump = lp64_dump_with_floats [ ("__SIZEOF_FLOAT128__", "16") ];
+        expected = Ok { lp64 with optional_floats = [] };
+      } );
   ]
 
 let error_cases =
@@ -415,10 +442,9 @@ let error_cases =
     };
   ]
 
-let check_case case =
-  let outcome =
-    Target.of_predefined_macros ~enum_representation:Int_sized case.dump
-  in
+(* A case with the answers of the probes of its backend. *)
+let check_case probes case =
+  let outcome = Target.of_predefined_macros ~probes case.dump in
   if outcome = case.expected then true
   else (
     Printf.eprintf "FAIL: %s\n" case.name;
@@ -473,8 +499,10 @@ type query_case = {
   query_dump : string;
   short_probe : string;
   int_sized_probe : string;
+  float128_probe : string;
   options : string list;
-  answer : (Target.enum_representation, Target_query.error) result;
+  answer : (Target.enum_representation * bool, Target_query.error) result;
+      (** The representation, and whether the model has __float128. *)
 }
 
 let write_file path text =
@@ -482,7 +510,7 @@ let write_file path text =
       Out_channel.output_string channel text)
 
 (* A backend that prints the case's dump for -dM and runs the command of
-   the probe whose text it reads on stdin, told apart by its size; the
+   the probe whose text it reads on stdin, told apart by its text; the
    paths of the dump and of the backend. *)
 let fake_backend case =
   let dump = Filename.temp_file "dump" ".txt" in
@@ -499,6 +527,7 @@ let fake_backend case =
          "case \"$(cat)\" in";
          "*'== 1 ?'*) " ^ case.short_probe ^ " ;;";
          "*'== sizeof(int) ?'*) " ^ case.int_sized_probe ^ " ;;";
+         "*__float128*) " ^ case.float128_probe ^ " ;;";
          "esac";
          "exit 2";
          "";
@@ -507,14 +536,16 @@ let fake_backend case =
   (dump, backend)
 
 let query_cases =
+  (* The dump has __SIZEOF_FLOAT128__, which the model does not read. *)
   let int_sized_alone =
     {
       query_name = "the int-sized probe alone compiles";
       query_dump = lp64_dump;
       short_probe = fails;
       int_sized_probe = compiles;
+      float128_probe = fails;
       options = [];
-      answer = Ok Target.Int_sized;
+      answer = Ok (Target.Int_sized, false);
     }
   in
   [
@@ -524,7 +555,7 @@ let query_cases =
       query_name = "the short probe alone compiles";
       short_probe = compiles;
       int_sized_probe = fails;
-      answer = Ok Target.Short;
+      answer = Ok (Target.Short, false);
     };
     {
       int_sized_alone with
@@ -553,6 +584,19 @@ let query_cases =
       short_probe = killed;
       answer = Error (Target_query.Probe_ended_by_signal []);
     };
+    {
+      int_sized_alone with
+      query_name = "__float128 where its probe compiles, without its macro";
+      query_dump = dump_of (without "__SIZEOF_FLOAT128__");
+      float128_probe = compiles;
+      answer = Ok (Target.Int_sized, true);
+    };
+    {
+      int_sized_alone with
+      query_name = "a signal ends the probe of __float128";
+      float128_probe = killed;
+      answer = Error (Target_query.Probe_ended_by_signal []);
+    };
   ]
 
 let check_query case =
@@ -561,7 +605,10 @@ let check_query case =
     Fun.protect
       ~finally:(fun () -> List.iter Sys.remove [ dump; backend ])
       (fun () -> Target_query.query ~program:backend case.options)
-    |> Result.map (fun (target : Target.t) -> target.enum_representation)
+    |> Result.map (fun (target : Target.t) ->
+           ( target.enum_representation,
+             List.mem Typec_syntax.Optional_float.Gnu_float128
+               target.optional_floats ))
   in
   if outcome = case.answer then true
   else (
@@ -570,7 +617,14 @@ let check_query case =
 
 let () =
   let results =
-    List.map check_case (model_cases @ optional_float_cases @ error_cases)
+    List.map
+      (check_case Canned_targets.gcc_probes)
+      (model_cases @ error_cases)
+    @ List.map (check_case Canned_targets.clang_arm_probes) ilp32_cases
+    @ List.map
+        (fun (gnu_float128, case) ->
+          check_case { Canned_targets.gcc_probes with gnu_float128 } case)
+        optional_float_cases
     @ List.map check_width widths
     @ List.map check_signed signedness
     @ [ without_int128 () ]

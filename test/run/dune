@@ -73,7 +73,7 @@
 (executable
  (name parse_check)
  (modules parse_check)
- (libraries typec_cpp typec_syntax typec_sema typec_test_support))
+ (libraries typec_cpp typec_syntax typec_sema typec_test_support typec_driver))
 
 (cram
  (applies_to parse headers)
@@ -85,7 +85,7 @@
 (executable
  (name declaration_probe)
  (modules declaration_probe)
- (libraries typec_cpp typec_syntax typec_sema))
+ (libraries typec_cpp typec_syntax typec_sema typec_driver))
 
 (cram
  (applies_to declarations)
@@ -98,12 +98,12 @@
 (executable
  (name expression_probe)
  (modules expression_probe)
- (libraries typec_cpp typec_syntax typec_sema))
+ (libraries typec_cpp typec_syntax typec_sema typec_driver))
 
 (executable
  (name builtin_probe)
  (modules builtin_probe)
- (libraries typec_sema))
+ (libraries typec_sema typec_driver))
 
 (cram
  (applies_to expressions initialisers)

@@ -1,21 +1,22 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* Writes a preprocessed C file with a static assertion after each
-   expression statement of its function bodies, for the target model read
-   from a macro dump: that the expression has the type typec gives it,
-   qualifiers included, and, where typec calls it an lvalue, a use of its
-   address, and the value of each [__builtin_types_compatible_p] that
-   typec answers. A backend that compiles the result agrees with typec on
-   every one. The statements of compound statements are probed, those under
-   other statements not; types that are not C when spelled, unknown
-   types, among them those that GCC gives otherwise than Clang, variably
-   modified ones and the bit-fields that a member access designates,
-   which typeof refuses, are left out. *)
+(* Writes a preprocessed C file with a static assertion after each expression
+   statement of its function bodies, for the target model that typec's target
+   query reads from a backend: that the expression has the type typec gives
+   it, qualifiers included, and, where typec calls it an lvalue, a use of its
+   address, and the value of each [__builtin_types_compatible_p] that typec
+   answers. A backend that compiles the result agrees with typec on every
+   one. The statements of compound statements are probed, those under other
+   statements not; types that are not C when spelled, unknown types, among
+   them those that GCC gives otherwise than Clang, variably modified ones and
+   the bit-fields that a member access designates, which typeof refuses, are
+   left out. *)
 
 open Typec_cpp
 open Typec_syntax
 open Typec_sema
+module Target_query = Typec_driver.Target_query
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
@@ -107,12 +108,12 @@ let print_with text inserted =
   print_string (String.sub text !at (String.length text - !at))
 
 let () =
-  match Sys.argv with
-  | [| _; dump; source |] ->
+  match Array.to_list Sys.argv with
+  | _ :: source :: program :: options ->
       let target =
-        or_exit Target.error_message
-          (Target.of_predefined_macros ~enum_representation:Int_sized
-             (read_file dump))
+        or_exit
+          (Target_query.error_message ~program)
+          (Target_query.query ~program options)
       in
       let contents = read_file source in
       let text =
@@ -128,5 +129,5 @@ let () =
       in
       print_with contents (insertions contents text result unit)
   | _ ->
-      prerr_endline "usage: expression_probe MACRO-DUMP PREPROCESSED-C";
+      prerr_endline "usage: expression_probe PREPROCESSED-C CC [OPTION...]";
       exit 2

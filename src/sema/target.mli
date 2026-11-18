@@ -36,6 +36,13 @@ type backend = {
     two can give one size and differ in rank. *)
 type enum_representation = Int_sized | Short
 
+(** The facts that no macro states on every target, which the target
+    query learns by probe compiles. *)
+type probes = {
+  enumeration_representation : enum_representation;
+  gnu_float128 : bool;  (** Whether the backend has [__float128]. *)
+}
+
 (** Sizes are in bytes, that is in units of [char]. The widths of the
     typedefs such as [size_t] follow from the integer type behind each;
     see {!integer_width}. *)
@@ -62,8 +69,10 @@ type t = {
   optional_floats : Typec_syntax.Optional_float.t list;
       (** The optional floating types that the backend has, in the order
           of [Optional_float.all]: those whose macro it defines,
-          [__FLTN_MANT_DIG__] for [_FloatN], [__FLTNX_MANT_DIG__] for
-          [_FloatNx] and [__SIZEOF_FLOAT128__] for [__float128]. *)
+          [__FLTN_MANT_DIG__] for [_FloatN] and [__FLTNX_MANT_DIG__] for
+          [_FloatNx], and [__float128] where the target query's probe
+          compiles it. [__SIZEOF_FLOAT128__] does not say: GCC 16 for
+          AArch64 macOS has the type without the macro. *)
   size_type : Integer.t;  (** [size_t] *)
   ptrdiff_type : Integer.t;  (** [ptrdiff_t] *)
   wchar_type : Integer.t;  (** [wchar_t] *)
@@ -104,10 +113,9 @@ val max_integer_width : int
 (** 128 bits: the widest integer type of a model, which bounds the work
     of constant evaluation. *)
 
-val of_predefined_macros :
-  enum_representation:enum_representation -> string -> (t, error) result
-(** [of_predefined_macros ~enum_representation dump] is the model of the
-    backend with the enumeration representation [enum_representation]. [dump]
+val of_predefined_macros : probes:probes -> string -> (t, error) result
+(** [of_predefined_macros ~probes dump] is the model of the backend whose
+    probes gave [probes]. [dump]
     is the output of [cc -dM -E]: one [#define NAME VALUE] per line,
     empty lines allowed. Macros the model
     does not use are ignored, but every line must have that form. The

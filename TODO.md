@@ -1488,8 +1488,8 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
     `slice_lowering.t`, `try_expressions.t` and `containers.t` use.
   * That GCC reports the facts of `target.t`'s `Darwin arm64` entry as
     Apple's Clang does (signed plain char, 8-byte `long double`,
-    `wchar_t` int, no `__float128`), and has every optional floating
-    type the test expects, `_Float64x` and `_Float128` included.
+    `wchar_t` int), and has every optional floating type the test
+    expects, `_Float64x` and `_Float128` included.
   * The trap of a checked index stops lldb at the line of the check
     with both backends, as the lldb examples of `docs/tutorial.md`
     need.
@@ -1741,10 +1741,10 @@ types (design 13.3).
   Clang writes a node's range before its children. A field with each
   record's depth among the expressions would state it.
 - [Low] test/run/target.t keys the expected plain-char signedness,
-  long double size, wchar_t and __float128 on `uname -sm` (x86-64, Linux
-  aarch64, Darwin arm64), a hand list that each new host extends; take
-  the expectations from the backend's own macros (__CHAR_UNSIGNED__,
-  __SIZEOF_LONG_DOUBLE__, __WCHAR_TYPE__, __SIZEOF_FLOAT128__) instead.
+  long double size and wchar_t on `uname -sm` (x86-64, Linux aarch64,
+  Darwin arm64), a hand list that each new host extends; take the
+  expectations from the backend's own macros (__CHAR_UNSIGNED__,
+  __SIZEOF_LONG_DOUBLE__, __WCHAR_TYPE__) instead.
 
 ## Language reference
 

@@ -2,16 +2,17 @@
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
 (* Writes a preprocessed C file followed by static assertions of what
-   typec reads in its declarations, for the target model read from a macro
-   dump: the type of each identifier at file scope, the value of each
-   enumerator and the integer type of each enumeration that a typedef
-   names. A backend that compiles the result agrees with typec on every
-   one. Types that are not C when spelled, such as anonymous structures,
-   are left out. *)
+   typec reads in its declarations, for the target model that typec's
+   target query reads from a backend: the type of each identifier at file
+   scope, the value of each enumerator and the integer type of each
+   enumeration that a typedef names. A backend that compiles the result
+   agrees with typec on every one. Types that are not C when spelled, such
+   as anonymous structures, are left out. *)
 
 open Typec_cpp
 open Typec_syntax
 open Typec_sema
+module Target_query = Typec_driver.Target_query
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
@@ -90,12 +91,12 @@ let print_identifier result (name, reference) =
       exit 1
 
 let () =
-  match Sys.argv with
-  | [| _; dump; source |] ->
+  match Array.to_list Sys.argv with
+  | _ :: source :: program :: options ->
       let target =
-        or_exit Target.error_message
-          (Target.of_predefined_macros ~enum_representation:Int_sized
-             (read_file dump))
+        or_exit
+          (Target_query.error_message ~program)
+          (Target_query.query ~program options)
       in
       let contents = read_file source in
       let text =
@@ -112,5 +113,5 @@ let () =
       print_string contents;
       List.iter (print_identifier result) file_scope.ordinary
   | _ ->
-      prerr_endline "usage: declaration_probe MACRO-DUMP PREPROCESSED-C";
+      prerr_endline "usage: declaration_probe PREPROCESSED-C CC [OPTION...]";
       exit 2

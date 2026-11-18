@@ -709,7 +709,7 @@ let () =
   check "read back, nothing follows the moved text"
     (Array.length read_back = 17)
 
-let lp64 = Canned_targets.target Canned_targets.lp64_macros
+let lp64 = Canned_targets.(target gcc_probes lp64_macros)
 
 (* Design 9.3: a header's text guards the definition of an instance and
    ends with the enumeration assertion and the packing probe under names

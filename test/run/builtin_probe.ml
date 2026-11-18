@@ -1,8 +1,9 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* builtin_probe MACRO-DUMP calls | others | unavailable | withheld: for
-   the target model of the dump, the builtins of the table by what the
+(* builtin_probe calls | others | unavailable | withheld CC [OPTION...]:
+   for the target model of the backend CC under the options, as typec's
+   target query reads it, the builtins of the table by what the
    backend has. [calls] writes C that calls each one with a prototype,
    with arguments of its parameter types, in a function for each, and
    once more with an extra argument where it is variadic; [others] lists
@@ -12,8 +13,7 @@
    has on other architectures only. *)
 
 open Typec_sema
-
-let read_file path = In_channel.with_open_bin path In_channel.input_all
+module Target_query = Typec_driver.Target_query
 
 let or_exit = function
   | Ok value -> value
@@ -102,13 +102,13 @@ let unavailable target =
     Builtin_function.table
 
 let () =
-  match Sys.argv with
-  | [| _; dump; mode |] -> (
+  match Array.to_list Sys.argv with
+  | _ :: mode :: program :: options -> (
       let target =
         or_exit
-          (Result.map_error Target.error_message
-             (Target.of_predefined_macros ~enum_representation:Int_sized
-                (read_file dump)))
+          (Result.map_error
+             (Target_query.error_message ~program)
+             (Target_query.query ~program options))
       in
       match mode with
       | "calls" -> calls target
@@ -118,5 +118,6 @@ let () =
       | _ -> or_exit (Error ("no mode " ^ mode)))
   | _ ->
       prerr_endline
-        "usage: builtin_probe MACRO-DUMP calls|others|unavailable|withheld";
+        "usage: builtin_probe calls|others|unavailable|withheld CC \
+         [OPTION...]";
       exit 2

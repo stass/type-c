@@ -7,11 +7,8 @@ system headers.
 
   $ . ./backends.sh
 
-parse_check reads with the keywords of the backend whose predefined
-macros it is given.
-
-  $ "$clang" -std=gnu11 -dM -E -x c /dev/null > clang.macros
-  $ "$gcc" -std=gnu11 -dM -E -x c /dev/null > gcc.macros
+parse_check reads with the keywords of the backend it is given, under
+the options that follow it, as typec reads them.
 
   $ cat > t.c <<'EOF'
   > typedef unsigned long size_type;
@@ -84,7 +81,7 @@ stands in the middle of the initialiser of sum.
   >   t.c > clang.i
   $ grep -c '^#pragma' clang.i
   1
-  $ ./parse_check.exe clang.macros clang.i
+  $ ./parse_check.exe clang.i "$clang" -std=gnu11
   declaration size_type
   declaration node node_pointer
   declaration of a tag
@@ -112,7 +109,7 @@ stands in the middle of the initialiser of sum.
   >   t.c > gcc.i
   $ grep -c '^#pragma' gcc.i
   1
-  $ ./parse_check.exe gcc.macros gcc.i
+  $ ./parse_check.exe gcc.i "$gcc" -std=gnu11
   declaration size_type
   declaration node node_pointer
   declaration of a tag
@@ -145,11 +142,11 @@ is written for its own compiler and may use its extensions.
   > EOF
   $ printf '#include <barrier.h>\nint main(void) { return pick(0, 1); }\n' > h.c
   $ "$clang" -std=gnu11 -E -isystem include h.c > h-clang.i
-  $ ./parse_check.exe clang.macros h-clang.i
+  $ ./parse_check.exe h-clang.i "$clang" -std=gnu11
   function pick
   function main
   $ "$gcc" -std=gnu11 -E -isystem include h.c > h-gcc.i
-  $ ./parse_check.exe gcc.macros h-gcc.i
+  $ ./parse_check.exe h-gcc.i "$gcc" -std=gnu11
   function pick
   function main
 
@@ -250,9 +247,9 @@ compile the file without a warning.
   $ "$clang" -std=gnu11 -fsyntax-only gnu.c
   $ "$gcc" -std=gnu11 -fsyntax-only gnu.c
   $ "$clang" -std=gnu11 -E gnu.c > gnu-clang.i
-  $ ./parse_check.exe clang.macros gnu-clang.i > gnu-clang.out
+  $ ./parse_check.exe gnu-clang.i "$clang" -std=gnu11 > gnu-clang.out
   $ "$gcc" -std=gnu11 -E gnu.c > gnu-gcc.i
-  $ ./parse_check.exe gcc.macros gnu-gcc.i > gnu-gcc.out
+  $ ./parse_check.exe gnu-gcc.i "$gcc" -std=gnu11 > gnu-gcc.out
   $ cmp gnu-clang.out gnu-gcc.out
   $ cat gnu-clang.out
   declaration wide
@@ -308,7 +305,7 @@ needs -fblocks.
   > EOF
   $ "$clang" -std=gnu11 -fblocks -fsyntax-only clang.c
   $ "$clang" -std=gnu11 -fblocks -E clang.c > clang-only.i
-  $ ./parse_check.exe clang.macros clang-only.i
+  $ ./parse_check.exe clang-only.i "$clang" -std=gnu11
   declaration callback
   declaration done
   declaration twice
@@ -322,6 +319,6 @@ A parse error is reported at its presumed location. A nested function
 is outside the profile.
 
   $ printf '# 1 "t.c"\nint x;\nvoid f(void) { int g(void) { } }\n' > bad.i
-  $ ./parse_check.exe clang.macros bad.i
+  $ ./parse_check.exe bad.i "$clang" -std=gnu11
   parse_check: t.c:2: error: a function definition in a block (a GNU nested function) is outside the GNU profile [unsupported]
   [1]

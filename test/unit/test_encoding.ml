@@ -6,7 +6,7 @@ open Typec_syntax
 open Typec_sema
 open Typec_test_support
 
-let lp64 = Canned_targets.target Canned_targets.lp64_macros
+let lp64 = Canned_targets.(target gcc_probes lp64_macros)
 let failures = ref 0
 
 let fail_case source message =

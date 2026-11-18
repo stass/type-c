@@ -137,7 +137,23 @@ let probe_compiles ~program ~aux_directory options text =
 (* Two probes and not one, whose failure would read as the other
    representation, so that no setup error of the backend passes for an
    answer: such an error fails both. *)
-let enumeration_representation ~program options =
+let enumeration_representation options compiles =
+  let short = compiles short_probe in
+  let int_sized = compiles int_sized_probe in
+  match (short, int_sized) with
+  | true, false -> Target.Short
+  | false, true -> Target.Int_sized
+  | false, false -> raise (Failed (Neither_enumeration_probe options))
+  | true, true -> raise (Failed (Both_enumeration_probes options))
+
+(* __float128 is a builtin typedef name to GCC and a keyword to Clang, so
+   the typedef compiles exactly where the backend has the type. *)
+let float128_probe = "typedef __float128 __tc_float128_probe;\n"
+
+(* One probe of __float128 suffices: an enumeration probe has compiled
+   under the same options first, so no deterministic setup error of the
+   backend fails it, only a transient one. *)
+let probe ~program options =
   let aux_directory =
     try Temp_dir.create ()
     with Sys_error message -> raise (Failed (No_temporary_directory message))
@@ -146,27 +162,29 @@ let enumeration_representation ~program options =
     ~finally:(fun () -> Temp_dir.remove aux_directory)
     (fun () ->
       let compiles = probe_compiles ~program ~aux_directory options in
-      let short = compiles short_probe in
-      let int_sized = compiles int_sized_probe in
-      match (short, int_sized) with
-      | true, false -> Target.Short
-      | false, true -> Target.Int_sized
-      | false, false -> raise (Failed (Neither_enumeration_probe options))
-      | true, true -> raise (Failed (Both_enumeration_probes options)))
+      let enumeration_representation =
+        enumeration_representation options compiles
+      in
+      { Target.enumeration_representation;
+        gnu_float128 = compiles float128_probe })
+
+(* The answers that the first check of the model takes, before the
+   probes run: they change no check. *)
+let unprobed =
+  { Target.enumeration_representation = Int_sized; gnu_float128 = false }
 
 (* The macro dump runs first and shows the backend's messages, and the
    model is checked before the probes run, so the errors of setup that
-   they would hide are reported. The representation changes no check of
-   the model, so the first check takes either. *)
+   they would hide are reported. *)
 let query ~program options =
   try
     let dump = run_backend program (options @ macro_dump_arguments) in
-    let model enum_representation =
-      Target.of_predefined_macros ~enum_representation dump
+    let model probes =
+      Target.of_predefined_macros ~probes dump
       |> Result.map_error (fun error -> Invalid_macros error)
     in
-    Result.bind (model Target.Int_sized) (fun _ ->
-        model (enumeration_representation ~program options))
+    Result.bind (model unprobed) (fun _ ->
+        model (probe ~program options))
   with Failed error -> Error error
 
 (* Options come from the command line, so %S escapes any control
@@ -207,7 +225,7 @@ let error_message ~program = function
   | Probe_ended_by_signal options ->
       Printf.sprintf
         "the C compiler %S was ended by a signal compiling a probe of the \
-         enumeration representation with %s"
+         target with %s"
         program (options_text options)
   | No_temporary_directory message ->
       "cannot create a temporary directory: " ^ message

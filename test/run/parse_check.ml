@@ -1,9 +1,10 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* parse_check MACROS FILE: reads and parses the cc -E output FILE with
-   the keywords of the backend whose cc -dM -E output is MACROS, in GNU C
-   whatever the dialect of FILE, checks that the spans of the tree nest
+(* parse_check FILE CC [OPTION...]: reads and parses the cc -E output FILE
+   with the keywords of the backend CC under the options, whose target
+   model typec's target query reads, in GNU C whatever the dialect of
+   FILE, checks that the spans of the tree nest
    in order and that every token outside the external declarations is a
    pragma or the universe text's, and prints what each external
    declaration declares. *)
@@ -12,6 +13,7 @@ open Typec_cpp
 open Typec_syntax
 open Typec_sema
 open Typec_test_support
+module Target_query = Typec_driver.Target_query
 
 let fail message =
   prerr_endline ("parse_check: " ^ message);
@@ -71,18 +73,15 @@ let describe = function
   | Tree.Top_level_asm _ -> "assembler"
   | Tree.Empty_declaration _ -> "empty declaration"
 
-let keywords_of_dump path =
-  (* The representation of enumerations changes no keyword. *)
-  match
-    Target.of_predefined_macros ~enum_representation:Int_sized (read_file path)
-  with
+let keywords_of_backend program options =
+  match Target_query.query ~program options with
   | Ok target -> Target.keywords target Gnu
-  | Error error -> fail (Target.error_message error)
+  | Error error -> fail (Target_query.error_message ~program error)
 
 let () =
-  match Sys.argv with
-  | [| _; macros; path |] -> (
-      let keywords = keywords_of_dump macros in
+  match Array.to_list Sys.argv with
+  | _ :: path :: program :: options -> (
+      let keywords = keywords_of_backend program options in
       match Reader.read ~name:path (read_file path) with
       | Error error -> fail (Reader.error_message error)
       | Ok reader -> (
@@ -98,4 +97,4 @@ let () =
                   fail (Printf.sprintf "token %d is outside the tree" index))
                 (first_token_outside reader declarations);
               List.iter (fun d -> print_endline (describe d)) declarations))
-  | _ -> fail "usage: parse_check MACROS FILE"
+  | _ -> fail "usage: parse_check FILE CC [OPTION...]"

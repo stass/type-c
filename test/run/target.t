@@ -8,8 +8,8 @@ arm64 Linux or macOS host. Their release varies with the host, and so do
 the optional floating types of Clang and uint64_t, which are left out
 here: uint64_t is unsigned long long on macOS. The architecture, the
 signedness of plain char, the size of long double and the type of
-wchar_t follow the host, and so does __float128, which is x86-64 alone;
-they are checked on their own below.
+wchar_t follow the host, and so does __float128; they are checked on
+their own below.
 
   $ unset TYPEC_CC
   $ . ./backends.sh
@@ -50,11 +50,11 @@ reads the same target.
 
   $ case $(uname -sm) in
   >   *" x86_64" | *" amd64") architecture=x86 char_signed=true
-  >     long_double=16 wchar_type=int float128=1 ;;
+  >     long_double=16 wchar_type=int ;;
   >   "Linux aarch64") architecture=AArch64 char_signed=false
-  >     long_double=16 wchar_type="unsigned int" float128=0 ;;
+  >     long_double=16 wchar_type="unsigned int" ;;
   >   "Darwin arm64") architecture=AArch64 char_signed=true
-  >     long_double=8 wchar_type=int float128=0 ;;
+  >     long_double=8 wchar_type=int ;;
   >   *) echo "no expected model for $(uname -sm)" ;;
   > esac
   $ printf '%s: %s\n' architecture $architecture char_signed $char_signed \
@@ -77,8 +77,7 @@ reads the same target.
   sizeof_pointer: 8
   char16_type: unsigned short
 
-GCC has every optional floating type on each host, and __float128 on
-x86-64.
+GCC has every optional floating type on each host.
 
   $ typec --cc=$gcc --print-target | grep '^optional_floats:' |
   >   tr ' ' '\n' | grep -v '^__float128$'
@@ -89,7 +88,19 @@ x86-64.
   _Float128
   _Float32x
   _Float64x
-  $ test $(typec --cc=$gcc --print-target | grep -c ' __float128') = $float128
+
+The model has __float128 exactly where the backend compiles the type:
+GCC on x86-64 and on AArch64 macOS, the latter without
+__SIZEOF_FLOAT128__, and Clang on x86-64 Linux.
+
+  $ float128_agrees() {
+  >   if echo 'typedef __float128 t;' | "$1" -fsyntax-only -x c - 2> /dev/null
+  >   then expected=1; else expected=0; fi
+  >   test "$(typec --cc="$1" --print-target | grep -c ' __float128')" \
+  >     = $expected || echo "__float128 differs: $1"
+  > }
+  $ float128_agrees "$clang"
+  $ float128_agrees "$gcc"
 
 The options reach the backend, so they change the model.
 

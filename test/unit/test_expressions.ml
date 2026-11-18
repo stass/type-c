@@ -11,12 +11,12 @@ open Typec_syntax
 open Typec_sema
 open Typec_test_support
 
-let lp64 = Canned_targets.(target (as_clang lp64_macros))
-let ilp32 = Canned_targets.(target (as_clang ilp32_macros))
-let lp64_gcc = Canned_targets.(target (as_gcc lp64_macros))
-let ilp32_gcc = Canned_targets.(target (as_gcc ilp32_macros))
-let aarch64 = Canned_targets.(target (as_clang aarch64_macros))
-let aarch64_gcc = Canned_targets.(target (as_gcc aarch64_macros))
+let lp64 = Canned_targets.(target gcc_probes (as_clang lp64_macros))
+let ilp32 = Canned_targets.(target clang_arm_probes (as_clang ilp32_macros))
+let lp64_gcc = Canned_targets.(target gcc_probes (as_gcc lp64_macros))
+let ilp32_gcc = Canned_targets.(target clang_arm_probes (as_gcc ilp32_macros))
+let aarch64 = Canned_targets.(target gcc_probes (as_clang aarch64_macros))
+let aarch64_gcc = Canned_targets.(target gcc_probes (as_gcc aarch64_macros))
 
 (* The ILP32 macros with these in place of theirs. *)
 let ilp32_with replacements =
@@ -29,7 +29,7 @@ let ilp32_with replacements =
    has 16 bits. *)
 let ilp32_long_uint32_gcc =
   let macros = ilp32_with [ ("__UINT32_TYPE__", "long unsigned int") ] in
-  Canned_targets.(target (as_gcc macros))
+  Canned_targets.(target clang_arm_probes (as_gcc macros))
 
 let int16_macros =
   ilp32_with
@@ -38,8 +38,8 @@ let int16_macros =
       ("__UINT16_TYPE__", "unsigned int");
       ("__UINT32_TYPE__", "long unsigned int");
     ]
-let int16 = Canned_targets.target int16_macros
-let int16_gcc = Canned_targets.(target (as_gcc int16_macros))
+let int16 = Canned_targets.target Canned_targets.clang_arm_probes int16_macros
+let int16_gcc = Canned_targets.(target clang_arm_probes (as_gcc int16_macros))
 
 (* Declarations that most cases use. *)
 let prelude =

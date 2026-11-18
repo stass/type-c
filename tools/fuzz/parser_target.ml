@@ -20,7 +20,7 @@ open Typec_syntax
 open Typec_test_support
 
 let violated = Property.violated
-let lp64 = Canned_targets.target Canned_targets.lp64_macros
+let lp64 = Canned_targets.(target gcc_probes lp64_macros)
 
 (* The only call of the parser, so that a change to its interface is one
    edit here. *)

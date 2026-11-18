@@ -14,8 +14,9 @@
 
 open Typec_cpp
 
-let lp64 = Typec_test_support.Canned_targets.(target lp64_macros)
-let int16 = Typec_test_support.Canned_targets.(target lp64_int16_macros)
+let lp64 = Typec_test_support.Canned_targets.(target gcc_probes lp64_macros)
+let int16 =
+  Typec_test_support.Canned_targets.(target gcc_probes lp64_int16_macros)
 
 let preprocessed path source =
   if Filename.check_suffix path ".i" then source

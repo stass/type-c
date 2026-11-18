@@ -29,7 +29,10 @@ val query :
     [program options -fsyntax-only -w -dumpdir DIR/ -x c -], each reading
     its text from a pipe and writing to [/dev/null], with the files that
     an option makes it write in a temporary [DIR]; exactly one must exit
-    with status 0, and it names the representation. The macro dump inherits stdin and
+    with status 0, and it names the representation. A third probe in
+    the same way, [typedef __float128 NAME;], says whether the backend
+    has [__float128], which no macro says on every target. The macro
+    dump inherits stdin and
     stderr, every run the environment, and [program] is found through
     [PATH] when it has no slash. It raises [Unix.Unix_error] when a
     system call fails, as when the backend cannot be started; every pipe

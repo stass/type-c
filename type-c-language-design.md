@@ -6014,12 +6014,16 @@ guessed. *Provisional:* no macro says which Arm vector types a backend
 declares, so the architecture decides, as GCC 14 and Clang 21 declare
 Neon's and SVE's on AArch64 whatever the target's features; a
 later release that declares the names otherwise would settle it, and
-without one the rule stays. *Provisional:* an optional floating type
-is a keyword exactly where the backend's predefined macros say that it
-has the type, `__FLTN_MANT_DIG__` for `_FloatN`, `__FLTNX_MANT_DIG__`
-for `_FloatNx` and `__SIZEOF_FLOAT128__` for `__float128`, as on every
-backend of the test hosts: where the compiler lacks the keyword, the C
-library declares the spelling, as glibc declares `typedef __float128
+without one the rule stays. *Provisional:* a `_FloatN` or `_FloatNx`
+type is a keyword exactly where the backend's predefined macros say
+that it has the type, `__FLTN_MANT_DIG__` for `_FloatN` and
+`__FLTNX_MANT_DIG__` for `_FloatNx`, as on every backend of the test
+hosts. `__float128` has no such macro: GCC 16 for AArch64 macOS has the
+type, which its `stddef.h` uses in `max_align_t`, without
+`__SIZEOF_FLOAT128__`, so it is a keyword exactly where the target
+query's probe of it compiles (below). Where the compiler lacks the
+keyword, the C library declares the spelling, as glibc declares
+`typedef __float128
 _Float128;` for Clang, so no fixed keyword set reads glibc under both
 GCC and Clang. No macro says that a backend reserves a spelling it
 cannot use, as Apple Clang reserves `__float128` and GCC `_Float128x`;
@@ -6029,8 +6033,9 @@ is a builtin typedef name, which such a program can tell as well. Both
 GCC and Clang reserve `__int128` on targets without the type, i386
 among them, where typec reads it as an identifier in the same way. Only
 x86-64 backends confirm the rule; a backend of another architecture
-whose macros disagree with its keywords would settle it otherwise, and
-without one the rule stays. A construct outside the profile is an error
+whose `_FloatN` macros disagree with its keywords would settle it
+otherwise, and without one the rule stays. A construct outside the
+profile is an error
 that names it; the front end does not guess. GCC's nested functions are
 outside the profile, as Clang has none. A function body whose `{` is C
 text of a system header is not parsed: it is brace-matched and passed
@@ -6138,6 +6143,16 @@ file under a name of its own, as GCC 16's
 `-fdiagnostics-add-output=sarif`, may still write it for each probe. The compatible type of an
 enumeration follows from the representation by one rule (13.4), and
 every use of the enumeration's type reads it from there.
+
+A third probe in the same way, `typedef __float128
+__tc_float128_probe;`, says whether the backend has `__float128`, a
+builtin typedef name to GCC and a keyword to Clang: it compiles exactly
+where the type exists. One run suffices, since it runs after an
+enumeration probe compiled under the same options, so no deterministic
+setup error of the backend fails it alone; a transient one, such as a
+killed compiler, reads as no `__float128`. It compiles for GCC on x86-64 and on
+AArch64 macOS and for Clang on x86-64 Linux, and fails for Apple Clang
+21, which reserves the spelling, and for GCC on AArch64 Linux.
 
 The front end assumes two types that no predefined macro states.
 13.4 names them and asserts them in the emitted C, with the

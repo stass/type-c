@@ -11,9 +11,8 @@ included. The backends are those that backends.sh names, for two
 targets (its second_target).
 
   $ probe() {
-  >   "$@" -std=gnu11 -dM -E -x c /dev/null > macros &&
   >   "$@" -std=gnu11 -E initialisers.c > initialisers.i &&
-  >   ../expression_probe.exe macros initialisers.i > probe.c &&
+  >   ../expression_probe.exe initialisers.i "$@" -std=gnu11 > probe.c &&
   >   "$@" -std=gnu11 -w -fsyntax-only probe.c
   > }
   $ . ../backends.sh

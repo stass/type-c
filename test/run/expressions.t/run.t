@@ -2,7 +2,7 @@ SPDX-License-Identifier: BSD-2-Clause
 Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 typec agrees with its backends on the types of expressions. expression_probe
-reads the target model from a backend's predefined macros and a
+reads the target model of a backend, as typec reads it, and a
 preprocessed file, and writes the text with static assertions of the type
 typec gives each expression statement of a body, and a use of the address
 of each that it calls an lvalue. The backend compiles the result only if
@@ -15,9 +15,8 @@ draw are not of interest here.
   $ check() {
   >   std=$1 source=$2
   >   shift 2
-  >   "$@" $std -dM -E -x c /dev/null > macros &&
   >   "$@" $std -E $source.c > $source.i &&
-  >   ../expression_probe.exe macros $source.i > probe.c &&
+  >   ../expression_probe.exe $source.i "$@" $std > probe.c &&
   >   "$@" $std -w -fsyntax-only probe.c
   > }
   $ probe() {
@@ -45,17 +44,17 @@ undeclared in the backend.
   $ builtins() {
   >   cc=$1 errors=$2
   >   shift 2
-  >   "$cc" "$@" -std=gnu11 -dM -E -x c /dev/null > macros &&
-  >   ../builtin_probe.exe macros calls > calls.c &&
+  >   ../builtin_probe.exe calls "$cc" "$@" -std=gnu11 > calls.c &&
   >   "$cc" "$@" -std=gnu11 -E calls.c > calls.i &&
-  >   ../expression_probe.exe macros calls.i > probe.c &&
+  >   ../expression_probe.exe calls.i "$cc" "$@" -std=gnu11 > probe.c &&
   >   "$cc" "$@" -std=gnu11 $errors -fsyntax-only probe.c 2> log ||
   >     grep error: log
-  >   ../builtin_probe.exe macros others | while read -r name; do
+  >   ../builtin_probe.exe others "$cc" "$@" -std=gnu11 | while read -r name; do
   >     grep -q -E "(^|[^A-Za-z0-9_])$name\(" builtins.c ||
   >       echo "builtins.c does not call $name"
   >   done
-  >   ../builtin_probe.exe macros unavailable | while read -r name; do
+  >   ../builtin_probe.exe unavailable "$cc" "$@" -std=gnu11 |
+  >   while read -r name; do
   >     printf 'void f(void) { %s(); }\n' "$name" > one.c
   >     LC_ALL=C "$cc" "$@" -std=gnu11 -fsyntax-only one.c 2>&1 |
   >       grep -q -E 'unknown builtin|implicit declaration' ||
@@ -78,8 +77,7 @@ The backend refuses each call that the table withholds on the
 architecture.
 
   $ withheld() {
-  >   "$clang" "$@" -std=gnu11 -dM -E -x c /dev/null > macros &&
-  >   ../builtin_probe.exe macros withheld > withheld.c &&
+  >   ../builtin_probe.exe withheld "$clang" "$@" -std=gnu11 > withheld.c &&
   >   "$clang" "$@" -std=gnu11 -fsyntax-only withheld.c 2>&1 |
   >     grep -o '__builtin_[a-z0-9_]* is not supported for the current target'
   > }

@@ -7,6 +7,11 @@ type compiler = Gcc | Clang
 type backend = { compiler : compiler; major_version : int }
 type enum_representation = Int_sized | Short
 
+type probes = {
+  enumeration_representation : enum_representation;
+  gnu_float128 : bool;
+}
+
 type t = {
   backend : backend;
   architecture : architecture;
@@ -123,21 +128,22 @@ let read_count macros name = count_of_value name (find macros name)
 let read_optional_count macros name =
   Option.map (count_of_value name) (Macros.find_opt name macros)
 
-(* The macro that GCC and Clang define exactly where they have the type,
-   as each backend of a test host does (design 13.3). *)
-let optional_float_macro : Typec_syntax.Optional_float.t -> string =
-  function
-  | Float16 -> "__FLT16_MANT_DIG__"
-  | Float32 -> "__FLT32_MANT_DIG__"
-  | Float64 -> "__FLT64_MANT_DIG__"
-  | Float128 -> "__FLT128_MANT_DIG__"
-  | Float32x -> "__FLT32X_MANT_DIG__"
-  | Float64x -> "__FLT64X_MANT_DIG__"
-  | Gnu_float128 -> "__SIZEOF_FLOAT128__"
+(* A [_FloatN] or [_FloatNx] type exists exactly where GCC and Clang
+   define its macro, as each backend of a test host does; [__float128]
+   has no such macro (design 13.3), so the target query probes it. *)
+let has_optional_float ~gnu_float128 macros :
+    Typec_syntax.Optional_float.t -> bool = function
+  | Float16 -> Macros.mem "__FLT16_MANT_DIG__" macros
+  | Float32 -> Macros.mem "__FLT32_MANT_DIG__" macros
+  | Float64 -> Macros.mem "__FLT64_MANT_DIG__" macros
+  | Float128 -> Macros.mem "__FLT128_MANT_DIG__" macros
+  | Float32x -> Macros.mem "__FLT32X_MANT_DIG__" macros
+  | Float64x -> Macros.mem "__FLT64X_MANT_DIG__" macros
+  | Gnu_float128 -> gnu_float128
 
-let read_optional_floats macros =
+let read_optional_floats ~gnu_float128 macros =
   List.filter
-    (fun optional -> Macros.mem (optional_float_macro optional) macros)
+    (has_optional_float ~gnu_float128 macros)
     Typec_syntax.Optional_float.all
 
 (* A type is spelled as type specifiers (C11 6.7.2p2), such as
@@ -224,7 +230,7 @@ let check_backend backend =
   if backend.major_version < minimum_major_version backend.compiler then
     raise (Invalid (Unsupported_backend backend))
 
-let model_of_macros ~enum_representation macros backend =
+let model_of_macros ~probes macros backend =
   let count = read_count macros in
   let integer_type = read_integer_type macros in
   {
@@ -241,7 +247,8 @@ let model_of_macros ~enum_representation macros backend =
     sizeof_double = count "__SIZEOF_DOUBLE__";
     sizeof_long_double = count "__SIZEOF_LONG_DOUBLE__";
     sizeof_int128 = read_optional_count macros "__SIZEOF_INT128__";
-    optional_floats = read_optional_floats macros;
+    optional_floats =
+      read_optional_floats ~gnu_float128:probes.gnu_float128 macros;
     size_type = integer_type "__SIZE_TYPE__";
     ptrdiff_type = integer_type "__PTRDIFF_TYPE__";
     wchar_type = integer_type "__WCHAR_TYPE__";
@@ -255,7 +262,7 @@ let model_of_macros ~enum_representation macros backend =
     char32_type = integer_type "__CHAR32_TYPE__";
     byte_order = read_byte_order macros;
     stdc_version = read_stdc_version macros;
-    enum_representation;
+    enum_representation = probes.enumeration_representation;
   }
 
 
@@ -353,17 +360,17 @@ let check_typedefs model =
 
 (* The backend is checked first, so that an unsupported one is reported
    as such rather than by a macro of the model that it lacks. *)
-let checked_model ~enum_representation dump =
+let checked_model ~probes dump =
   let macros = macros_of_dump dump in
   let backend = read_backend macros in
   check_backend backend;
-  let model = model_of_macros ~enum_representation macros backend in
+  let model = model_of_macros ~probes macros backend in
   check_widths model;
   check_typedefs model;
   model
 
-let of_predefined_macros ~enum_representation dump =
-  match checked_model ~enum_representation dump with
+let of_predefined_macros ~probes dump =
+  match checked_model ~probes dump with
   | model -> Ok model
   | exception Invalid error -> Error error
 

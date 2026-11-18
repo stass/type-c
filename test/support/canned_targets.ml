@@ -111,12 +111,21 @@ let dump_of macros =
     (List.map (fun (name, value) -> "#define " ^ name ^ " " ^ value ^ "\n")
        macros)
 
-(* The model of a canned dump, which must be valid, with the int-sized
-   enumerations of the default of every host. *)
-let target macros =
+(* The probes' answers of GCC 14 for x86-64, whose dumps lp64_macros and
+   those made from it copy: int-sized enumerations, the default of every
+   host, and __float128. *)
+let gcc_probes : Typec_sema.Target.probes =
+  { enumeration_representation = Int_sized; gnu_float128 = true }
+
+(* The probes' answers of Clang 21 for Arm, whose dump ilp32_macros
+   copies: no __float128. *)
+let clang_arm_probes = { gcc_probes with gnu_float128 = false }
+
+(* The model of a canned dump, which must be valid, with the answers of
+   the probes of its backend. *)
+let target probes macros =
   match
-    Typec_sema.Target.of_predefined_macros ~enum_representation:Int_sized
-      (dump_of macros)
+    Typec_sema.Target.of_predefined_macros ~probes (dump_of macros)
   with
   | Ok target -> target
   | Error error -> failwith (Typec_sema.Target.error_message error)

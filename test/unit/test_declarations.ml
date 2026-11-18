@@ -6,11 +6,11 @@ open Typec_syntax
 open Typec_sema
 open Typec_test_support
 
-let lp64 = Canned_targets.target Canned_targets.lp64_macros
-let ilp32 = Canned_targets.target Canned_targets.ilp32_macros
-let lp64_clang = Canned_targets.(target (as_clang lp64_macros))
-let aarch64_gcc = Canned_targets.(target (as_gcc aarch64_macros))
-let aarch64_clang = Canned_targets.(target (as_clang aarch64_macros))
+let lp64 = Canned_targets.(target gcc_probes lp64_macros)
+let ilp32 = Canned_targets.(target clang_arm_probes ilp32_macros)
+let lp64_clang = Canned_targets.(target gcc_probes (as_clang lp64_macros))
+let aarch64_gcc = Canned_targets.(target gcc_probes (as_gcc aarch64_macros))
+let aarch64_clang = Canned_targets.(target gcc_probes (as_clang aarch64_macros))
 
 (* [file] is "in.c", C text, unless a case reads Type-C text. A parse
    error is the case's error as a typing error is. *)
@@ -1438,7 +1438,7 @@ let variant_of count =
    only a target whose int has 16 bits makes that reachable. *)
 let constructor_counts () =
   let file = "in.tc" in
-  let int16 = Canned_targets.target Canned_targets.lp64_int16_macros in
+  let int16 = Canned_targets.(target gcc_probes lp64_int16_macros) in
   let int16_short = { int16 with enum_representation = Short } in
   List.iter
     (fun target ->

@@ -17,7 +17,7 @@ open Typec_test_support
    words; Small_stack scales them to the platform. *)
 let limit_words = 256 * 1024
 
-let lp64 = Canned_targets.target Canned_targets.lp64_macros
+let lp64 = Canned_targets.(target gcc_probes lp64_macros)
 
 (* The C that [text] lowers to, or the error that refuses it. *)
 let lowered file text =

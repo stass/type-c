@@ -20,7 +20,7 @@ open Typec_syntax
 open Typec_sema
 open Typec_test_support
 
-let target = Canned_targets.(target (as_clang lp64_macros))
+let target = Canned_targets.(target gcc_probes (as_clang lp64_macros))
 
 (* Change the seed to draw other types; every seed must pass. *)
 let seed = 20262

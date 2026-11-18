@@ -4,11 +4,11 @@
 open Typec_sema
 open Typec_test_support
 
-let lp64 = Canned_targets.target Canned_targets.lp64_macros
-let lp64_clang = Canned_targets.(target (as_clang lp64_macros))
-let ilp32 = Canned_targets.target Canned_targets.ilp32_macros
+let lp64 = Canned_targets.(target gcc_probes lp64_macros)
+let lp64_clang = Canned_targets.(target gcc_probes (as_clang lp64_macros))
+let ilp32 = Canned_targets.(target clang_arm_probes ilp32_macros)
 
-let int16 = Canned_targets.target Canned_targets.lp64_int16_macros
+let int16 = Canned_targets.(target gcc_probes lp64_int16_macros)
 
 let check name actual expected =
   if actual = expected then true

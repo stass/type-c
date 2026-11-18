@@ -1833,8 +1833,10 @@ line, and last the enumeration representation, `int-sized` or `short`
 (as under `-fshort-enums`), which no macro states: `typec` learns it by
 two compiles of a probe,
 `BACKEND OPTIONS -fsyntax-only -w -dumpdir DIR/ -x c -`,
-each of which compiles under one representation alone. The other
-arguments are the backend options that select the
+each of which compiles under one representation alone. Whether the
+backend has `__float128`, among the optional floating types, comes from
+a third compile of the same form, since no macro says so on every
+target. The other arguments are the backend options that select the
 target or the dialect, such as `-m32`, `-funsigned-char` or `-std=gnu17`;
 inputs, `-o` and dependency options do not belong there.
 

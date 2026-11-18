@@ -13,7 +13,7 @@ open Typec_sema
 open Typec_emit
 open Typec_test_support
 
-let lp64 = Canned_targets.target Canned_targets.lp64_macros
+let lp64 = Canned_targets.(target gcc_probes lp64_macros)
 
 (* The text that [source] is read to, its tree and its declarations, read
    for [product]. *)

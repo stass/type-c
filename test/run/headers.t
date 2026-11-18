@@ -176,8 +176,7 @@ descriptor 3, so that nothing in the loop reads them.
   >     grep -q -e '<stdio.h>' all.tc || return 1
   >     grep -q -e '<unistd.h>' all.tc || return 1
   >     "$1" $mode -E -x c all.tc > all.i || return 1
-  >     "$1" $mode -dM -E -x c /dev/null > all.macros || return 1
-  >     ./parse_check.exe all.macros all.i > /dev/null || return 1
+  >     ./parse_check.exe all.i "$1" $mode > /dev/null || return 1
   >     typec --cc="$1" $mode --emit-c all.tc -o /dev/null || return 1
   >   done 3< modes.txt
   > }

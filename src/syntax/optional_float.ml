@@ -7,7 +7,8 @@
     use are here.
 
     Each spelling is a keyword exactly where the backend has the type,
-    which its predefined macros state (see {!Typec_sema.Target}). Where
+    which its predefined macros state, and for [__float128] a probe
+    compile of the target query (see {!Typec_sema.Target}). Where
     it is not, the C library declares the spelling itself: glibc reads
     [typedef __float128 _Float128;] under Clang, which has no keyword
     [_Float128]. A backend may reserve a spelling it cannot use, as
