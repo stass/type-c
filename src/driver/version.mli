@@ -4,5 +4,5 @@
 (** The release of [typec]. *)
 
 val release : string
-(** [release] is the version that dune-project names, such as ["0.3"];
+(** [release] is the version that dune-project names, such as ["1.0"];
     the build generates it from there, its one source. *)

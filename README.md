@@ -18,8 +18,9 @@ with `try` and `defer`. Its compiler, `typec`, takes the command line of
 compiler. A C11 file is already a Type-C file, so a program adopts it
 one file at a time.
 
-Type-C is early: every example on this page works today, and the rest
-of the language is designed but not built yet ([Status](#status)).
+Type-C 1.0, the core language, is released, and every example on this
+page works with `typec` today; checked mode is designed but not built
+yet ([Status](#status)).
 
 ## Try it
 
