@@ -19,8 +19,8 @@ compiler. A C11 file is already a Type-C file, so a program adopts it
 one file at a time.
 
 Type-C 1.0, the core language, is released, and every example on this
-page works with `typec` today; checked mode is designed but not built
-yet ([Status](#status)).
+page works with `typec` today; checked mode and a few additions are
+designed but not built yet ([Status](#status)).
 
 ## Try it
 
@@ -1315,7 +1315,9 @@ arm64 ([Developing and testing](#developing-and-testing)).
 
 Designed and **not yet implemented**: a checked mode, whose rules are
 provisional, that rules out specific classes of memory errors in the
-functions it covers (Stage 5 of the plan).
+functions it covers (Stage 5 of the plan); and `(case C = e)`, a test
+of one constructor that binds nothing and is an expression, so it can
+be negated, joined with `&&` and `||`, or stored (design 4.6 rule 8).
 
 ## Developing and testing
 

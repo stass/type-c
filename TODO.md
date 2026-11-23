@@ -1380,6 +1380,29 @@ the package, in the order of its commits:
 
 ## Matching
 
+- [Medium] Build the expression form of the single-pattern test,
+  `(case C = e)` (design 4.6 rule 8): parsing at `(` `case` in a
+  primary expression, with a diagnostic for `f(case C = e)` that
+  suggests the parentheses; typing (a constructor alone, an `int`
+  result; where C evaluates it, refused in a constant expression and
+  outside a function body, heads included, under a diagnostic name of
+  its own beside `slice-check-place`; an atomic operand and a `try` in
+  the operand refused); the lowering in place with the function's
+  `__tc_case` temporaries, and with the trap first where C does not
+  evaluate it (design 13.5); regression tests for a packed member, a
+  call, a volatile operand, nested and unsequenced forms, a use in an
+  extern inline function and an invalid tag that traps;
+  `docs/reference.md` 3.5 and the README's "Status". The lowering was
+  tried by hand on Clang 21 and GCC 16 and is clean under `-Wall
+  -Wextra -pedantic -Wconversion -Wshadow` and Clang's `-Wcomma`;
+  Pilot A's 20 predicate functions are the sites to port with it.
+- [Medium] Under `--trap-function` every trap calls `__tc_trap`, which
+  is `static`. In an inline definition with external linkage that is a
+  C11 6.7.4p3 constraint violation, which GCC 16 reports only as a
+  warning, for the traps of `match`, the single-pattern test, `try`
+  and the slice check alike. Decide whether a trap there calls the
+  trap function directly or typec refuses it, and say so in design
+  10.5.
 - [Medium] typec does not check that `&` takes no `register` object
   (C11 6.5.3.2p1): `register struct s r; (&r)->m` is a backend error.
   Record in `typed` that an lvalue designates a register object, or a

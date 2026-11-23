@@ -100,6 +100,7 @@ with a token sequence that C rejects:
 | Type declaration | `type` *identifier*, starting a declaration | Two identifiers start a C declaration only when the first names a type; 2.3 excludes that case. |
 | `match` statement | `match (` ... `) {`, starting a statement | A call cannot be followed by `{`. |
 | Single-pattern test | `if (case` or `while (case` | `case` begins a labelled statement and never an expression, so it cannot begin a C condition. |
+| Single-pattern test, expression form | `(case` | For the same reason `case` cannot follow `(`. |
 | Generic function | `generic (` ... `)`, starting a file-scope declaration | C11 has no implicit `int`, so this starts a C declaration only when `generic` names a type; 2.3 excludes that case. |
 | `unsafe` block | `unsafe {`, starting a statement | An identifier cannot be followed by `{`. |
 | Type application, explicit instance | *G* `(` *types* `)`, where *G* names a generic | Only Type-C declares such a *G*. |
@@ -1353,10 +1354,10 @@ A statement's *control* is every expression or declaration that it holds
 outside its body, the body of an `if` being both of its branches: a
 condition, the clauses of a `for`, the controlling
 expression of a `switch`, the scrutinee of a `match`, the operand of a
-single-pattern test (4.6). A `break` or `continue` in a statement
-expression in the control, which no loop, `switch` or `match` within that
-expression takes, is not in the body, and what it leaves depends on when
-the control is evaluated.
+single-pattern test that is a condition (4.6). A `break` or `continue`
+in a statement expression in the control, which no loop, `switch` or
+`match` within that expression takes, is not in the body, and what it
+leaves depends on when the control is evaluated.
 
 Control that is evaluated once, before the body, stands where a
 statement just before its own statement would: the jump goes to the
@@ -1421,6 +1422,11 @@ while (case Cons(head, tail) = *l) {
     sum += head;
     l = tail;
 }
+
+/* the expression form (rule 8): one constructor, no bindings */
+for (i = 0; i < n && (case Space = toks[i]); i++)
+    skipped++;
+errors += (case Err = r);
 ```
 
 A single-pattern test asks whether a variant value holds one constructor
@@ -1436,7 +1442,9 @@ and not an arm.
    the whole condition and stands nowhere else: not in a `for` or a `do`,
    and not parenthesised, negated or joined with `&&` or `||`, since
    `case` begins no C expression. There is one pattern; a test of several
-   constructors is a `match` whose labels share an arm (4.1(6)).
+   constructors is a `match` whose labels share an arm (4.1(6)). A test
+   of one constructor without its field list may stand in those places
+   in its expression form (rule 8).
 2. The operand `e` is an expression that extends to the closing
    parenthesis and obeys 4.1(1) as a scrutinee does: it has variant type,
    and a pointer is not dereferenced implicitly. So `case P = e && c`
@@ -1484,6 +1492,47 @@ and not an arm.
 7. The test puts no requirement on the other constructors, and 4.2 does
    not apply. A constructor added later fails the test, as it would reach
    a `default`.
+8. **The expression form.** `(case C = e)`, with its parentheses, is
+   a primary expression. `C` names a constructor of the operand's type,
+   unqualified and alone: no field list, no nested pattern, no binding.
+   The operand extends to the closing parenthesis and obeys rule 2. The
+   value has the type `int`: 1 where the test succeeds and 0 where it
+   fails, as `==` gives; it is not an lvalue. Where C evaluates it, the
+   operand is evaluated once and its tag is read once, in place, and
+   nothing else of the operand is read, also where it is volatile; an
+   invalid tag traps (4.5). Rules 3 to 6 have nothing to bind or
+   control here, and rule 7 holds.
+   * It reads a value at run time, as a call does. Where C evaluates
+     it, it stands in a function body, whose function declares its
+     temporary (13.5), and not in a constant expression. Outside a
+     function body, in the definition of a generic type, in the head of
+     a function and in any other declaration of file scope, it is an
+     error, as an index of a slice is (section 8 rule 9). One that C
+     does not evaluate, as in the operand of `sizeof`, stands wherever
+     an expression does. Whether C evaluates it is a judgement of
+     `typec`, and a wrong one traps before the operand is evaluated
+     (13.5).
+   * A full expression that holds the form is not resumed after the
+     same call of its function has begun to evaluate it again; where
+     one is, the behaviour is undefined, as section 8 rule 10 says of
+     an index of a slice.
+   * An atomic operand is refused: C leaves a member access of an
+     atomic structure undefined (C11 6.5.2.3p5), and the expression
+     form reads the tag in place, where `match` and the condition form
+     copy such an operand (13.5).
+   * A `try` does not stand in the operand: the form is not among the
+     operators that 5.1 rule 3 lets stand between a holder and its
+     `try`, so typing refuses it there.
+   * Unread text (13.5) holds no expression form. The backend reads
+     that text as C, and `(case` is not C, as a qualified constructor
+     is not (3.3).
+   * As the whole condition of an `if` or a `while`, `((case C = e))`
+     is the expression form, and `(case C = e)` is the condition form
+     with a pattern that binds nothing. They select alike and differ
+     in three things. The expression form reads in place, so it reads
+     the tag alone of a volatile operand and refuses an atomic one; it
+     refuses a `try` in its operand; and, having no bindings to skip,
+     it puts no limit of rule 6 on a jump into the statement.
 
 Rationale. In Pilot A 52 of 100 matches have one `case` and a `default`,
 and the port wrote 20 predicate functions and 9 accessor functions, the
@@ -1497,15 +1546,23 @@ statement of a C condition may complete and may leave a loop around it
 with `break`, and in the pilot a `break` ported into an arm left the
 match instead of the loop.
 
-The form stays a condition and not an expression. Pilot A written with
-the test (Step 12) has 74 tests, and 92 tag tests it does not fit: 30
-negated, 39 joined with `&&` or `||`, 17 in a `for` condition, 6 used as
-a value. None of them binds a field, so each stays a call of a predicate
-whose body is one test, while a test that is an expression would need
-binding scopes across `&&`, `||` and `!`. Without a field list a test
-that binds nothing does not repeat its constructor's arity at every
-site; in a `case` label the full pattern stays, so that a label always
-shows what an arm binds.
+A test that binds stays a condition and not an expression. Pilot A
+written with the test (Step 12) has 74 tests, and 92 tag tests the
+condition form does not fit: 30 negated, 39 joined with `&&` or `||`,
+17 in a `for` condition, 6 used as a value. None of them binds a field;
+written with the condition form alone, each stays a call of a predicate
+whose body is one test. A test that binds and is an expression would
+need binding scopes across `&&`, `||` and `!`; one that binds nothing
+needs none, and the expression form of rule 8 is that test, as
+Datatype99's `MATCHES` is for its tagged unions. The expression form
+changes no control flow but the trap, so unlike `try` it is evaluated
+in place, in C's order and under C's conditions, with no hoisting. It
+takes a constructor alone: a nested pattern in an expression would
+need the selection tree of 4.7 rule 6 written as one expression, a
+mechanism that waits for ported code that asks for it. Without a field
+list a test that binds nothing does not repeat its constructor's arity
+at every site; in a `case` label the full pattern stays, so that a
+label always shows what an arm binds.
 
 ### 4.7 Nested patterns
 
@@ -6655,6 +6712,7 @@ Two properties follow by construction:
 | `match` | A block: a pointer to the scrutinee where it is an lvalue whose address C aligns for its type; a pointer to the object that holds it where it is a member reached from that object by member designators only, `B.m.n` or `B->m.n`, and the address of the object is aligned; or else a copy. The address is aligned for a named object not declared `register`, a compound literal, the object of a pointer that is read as a stored value or returned by a call, and an element of an array whose address is aligned; it is not for a member of a structure or union, which a `#pragma pack` or an attribute may pack where typec does not see it and which the backend reads correctly through a member access only, nor for the object of a pointer that the scrutinee forms, as by converting a member array. So a member is read through its base: `__extension__ __auto_type const __tc_base0 = &(B);` for `B.m`, `= (B);` for `B->m`, then the tag and the fields as `__tc_base0->m.tag` and `__tc_base0->m.u.Mail.to`, so that no pointer to the member is formed. `__auto_type` spells the type because no name of the base's type that C11 can spell is sure to be visible, and `__extension__` keeps Clang from a warning under `-pedantic`. A copy of a member is not free: Clang at `-O2` compiles it to a `switch` on the member in place, but GCC 16 at `-O2` and arm-none-eabi-gcc 14.2 at `-Os` and `-O2` keep it; on the value form of `examples/smtp` (4.1), with its 26 KB state, copying the member instead of reading it through its base doubles the deepest stack path under GCC 16 `-O2` (106 KB against 54 KB) and adds half under ARM `-Os` (131 KB against 79 KB). A read through a pointer to a typedef of the variant declared `aligned(1)` is larger on ARMv5 (33 and 66 instructions against 19 and 21), so it is no alternative. A scrutinee whose member path holds a subscript, a pair of parentheses or another operator, as `B.a[1].m` or `(B.m).n`, or whose base's address is not aligned, is copied, and so is a volatile or atomic scrutinee; the base itself may be any aligned lvalue, as `a[i]` in `a[i].m`. Then: a `switch` on the tag with a `case` for every constructor; a block per arm that holds its block items as written and ends in a trap (10.5), `case X: { items trap }`; where the arm binds, that block declares the bindings first and holds the items in a block of their own, `case X: { bindings { items } trap }`; `break`, `continue` and `return` unchanged; `default:` and the `case` of the variant's hidden enumerator (10.1 rule 2) holding the trap. The copy is declared with the type `const struct R`, where `struct R` names the variant, or the instance, by its claimed tag (10.1 rule 6, 10.3): no declaration hides a claimed name, and nothing writes to the copy after its initialiser. |
 | Single-pattern test, `if` | A block: the operand held as a `match` holds its scrutinee; the tag, read once into a local; an `if` on that local. The true branch is a block that opens at the `)` of the test, declares the bindings and then holds what follows that `)` as written, the controlled statement `S` with a pragma that stands before it: `{ bindings S }`, whether the test binds or not and whether `S` is a compound statement or not. The false branch traps when the local is no constructor's tag and then holds the `else` statement, if there is one. |
 | Single-pattern test, `while` | The same block as the body of an endless loop, with a false branch that traps on an invalid tag and then ends in `break`. `break` and `continue` in the controlled statement stay unchanged, and the operand is evaluated in the body of that loop (4.4). |
+| Single-pattern test, expression form | In place, in the manner of the check of a slice (below): `((void)(__tc_case0 = (e).tag), (void)(__tc_case0 < 4u ? (void)0 : trap), __tc_case0 == expr_Add)`, with the lowered operand, its member `tag`, the number of the variant's constructors as an unsigned decimal constant, and the claimed enumerator (10.1 rule 6, 10.3). *trap* is the trap of 10.5 as an expression of type `void`, as in the check of a slice. `__tc_case0` is an `unsigned` temporary that the function declares where it declares the temporaries of a slice check: every tag type converts to `unsigned` without loss (10.1 rule 2), and the hidden enumerator is not below the count. Where C does not evaluate the form, as in the operand of `sizeof`, it is `((void)__builtin_trap(), (e).tag == expr_Add)`, which needs no temporary and, as the form of an index that C does not evaluate (below), traps first where the judgement of 4.6 rule 8 is wrong. The operand needs no pointer or copy: the backend reads a packed member's tag correctly through a member access, as the `match` row says, a member of an rvalue is C11, and C's order and conditions hold as written. A call that returns twice inside the operand assigns the temporary again before it is read; one elsewhere in the full expression is the case that 4.6 rule 8 leaves undefined. Discarded, as an expression statement, the form draws the backend's `-Wunused-value`, as `a == b;` does in C. With the builtin trap, Clang 21 and GCC 16 compile this at `-O0` and `-O2` with no warning under `-Wall -Wextra -pedantic -Wconversion -Wshadow`, and Clang under `-Wcomma`, for an operand that is a dereference, a packed member, a call and a volatile object, also in an inline definition with external linkage. |
 | Selection with a nested pattern | A `match` or a single-pattern test whose selection tree has more than one node (4.7 rule 6) holds its scrutinee or operand as its row says and then writes the tree: a local, `unsigned __tc_arm0;`, then a pointer local for each position under a `*` where a constructor pattern stands, `const struct V *__tc_p0_K = 0;` for the `K`th such position, of the variant `V`, and for each node a `switch` on the tag of the node's position, which ends with the `case` of the hidden enumerator and `default:` holding the trap (10.1 rule 2). The locals are numbered from 1 in the order in which the labels name their positions, so that each follows the one it is reached from, and the scrutinee's pointer is `__tc_match0`, or, for a member held through its base, `__tc_base0` followed by the member path, `__tc_base0->state.`, which then stands wherever `__tc_match0->` does below. An object is reached from the nearest local above it, `__tc_match0` or one of a position under a `*`, through the members of 10.1: a node under a `*` first points its local at the object that the pointer field points to, `__tc_p0_1 = __tc_match0->u.Add.l;`, and switches on `__tc_p0_1->tag`; a node at a field in place switches on the field's tag, `__tc_match0->u.Err.error.tag`, `__tc_p0_1->u.Wrapped.inner.tag`. A field in place has no local, since its address may be misaligned in a packed variant, where a member access is not. The `switch` has a `case` for every constructor of the position's variant, each followed by the `switch` or the leaf of its branch and a `break`; constructors that no label names at the position share one branch, after their `case` labels; `default:` holds the trap. A leaf is `__tc_arm0 = k;`. In a `match`, `k` numbers the arms from 0 in source order, and after the tree stands `switch (__tc_arm0)`, with `case k:` where the labels of arm `k` stood, the block of each arm as in the `match` row, and `default:` holding the trap. In a test the leaf of the pattern is 1 and every other leaf is 0, and the `if` of the test's row is on `__tc_arm0`; its false branch checks no tag, since the tree has. A binding is declared from the field of its position, `const __typeof__(F) x = F;`, where `F` is such as `__tc_p0_1->u.Num.value`. The path from a local to an object never passes a `*`, so a variant is held in place at most once on it and its length is bounded by the variants of the unit and the depth of the tree, not by the depth of a pattern under `*`; spelling the whole path from `__tc_match0` at each node would make a 100 KB pattern 120 deep over a long field name about 900 MB of text. Every path to a node or to an arm passes the nodes that point the locals that it reads, since a label is selected only after every tag that it names is read (4.7 rule 6); the null pointer that a local starts as spares a backend that cannot see this a warning of a value used uninitialized. |
 | Distinct type | A typedef. Casts are kept. A construct that asks whether two types are compatible, `_Generic` and `__builtin_types_compatible_p`, is answered by the front end where Type-C text compares a distinct type: one of the types compared (the controlling type or an association's, either operand) is or contains one. The selection keeps its controlling expression and every association, so the backend sees the names they use and the tags they declare outside the association type names, and is steered to the front end's choice: the type name of the association at position `i` becomes `char (*)[i]`, and the controlling expression `e` becomes `((void)(e), (char (*)[k])0)`, where `k` is the position of the selected association. Arrays of different lengths make these types pairwise incompatible, and `default` stays, as its position is no type name's. The builtin becomes `1` or `0`. C text compares the representation (10.2), and the backend answers. |
 | Type application | The name of its instance; the instance is declared and defined at file scope in the two steps of 10.3. |
@@ -8850,6 +8908,11 @@ function (9.3). `__tc_s0`,
 `__tc_i0`, `__tc_lo0` and `__tc_hi0` and so on are the temporaries of
 the test and of the conversion of a slice (above), declared where
 `__tc_ret` is, with the number of their test or conversion.
+`__tc_case0` and so on are the temporaries of the expression form of
+a single-pattern test, declared there too and numbered by a count of
+their own in each function, in the order of the source, a form before
+the forms in its operand, so that no two forms of one full expression
+share one.
 `__tc_match0`, `__tc_copy0`, `__tc_base0`, `__tc_tag0` and
 `__tc_arm0` are the pointer to the scrutinee or operand of a match or a
 single-pattern test, its copy, the pointer to the object that holds it
@@ -9090,6 +9153,9 @@ serialisation format for variants.
     line markers.
 11. [OCaml private types](https://ocaml.org/manual/5.2/privatetypes.html):
     the model for `private`.
+12. [Datatype99](https://github.com/hirrolot/datatype99): tagged unions
+    and matching in C99 macros; its `MATCHES` is the model for the
+    expression form of the single-pattern test (4.6 rule 8).
 
 ## Appendix A. Grammar
 
@@ -9120,6 +9186,7 @@ generic-head:          declaration-specifiers declarator
 primary-expression:    ... | variant-type "." identifier
                            | generic-function-name type-arguments
                            | slice-operation
+                           | "(" "case" identifier "=" expression ")"
 variant-type:          typedef-name | generic-type-name type-arguments
 unary-expression:      ... | "try" cast-expression
 
