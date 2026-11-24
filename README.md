@@ -1387,17 +1387,13 @@ or `-MQ` and `-MF`.
 
 [`examples/xargs`](examples/xargs/) ports FreeBSD's `xargs(1)`, the
 one that macOS ships as `/usr/bin/xargs`, function for function. The
-port found three bugs of upstream's, each shown with a transcript
-that runs on the host's own `xargs`
+port's types found two bugs in the original
 ([what the port found](examples/xargs/README.md#what-the-port-found)):
-`-n` with `-x` gives each command one argument, an `-I` argument of
-exactly `-S` bytes is cut and left unsubstituted, and an argument that
-does not fit is moved with a `memcpy` of overlapping ranges, which
-loses it with musl's `memcpy`. The port's types pointed at the first
-two: the line count, an `int` with 0 for "not given", became an
-`option`, and `strnsubst` returns a `result` and writes into a checked
-slice in place of reporting a truncation beside the string it cut.
-Making the buffer's pointers indices removed the third.
+
+- `xargs -n 3 -x` runs each command with one argument, not three.
+  The port's `option(int)` line count cannot be mistaken for a number.
+- `-I {} -S 5` cuts a 5-byte argument such as `ab{}c` to `ab{}`
+  without replacing `{}`. The port's `strnsubst` returns a `result`.
 
 [`examples/wordfreq`](examples/wordfreq/) measures what generic code
 costs: a word counter on a `map(K, V)` written in Type-C, against the
