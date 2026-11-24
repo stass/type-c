@@ -281,7 +281,7 @@ When an argument does not fit at the end of the buffer, the original
 runs a command with the arguments before it and moves the partial
 argument to the start of the buffer with `memcpy`. The two ranges
 overlap whenever the argument is longer than what came before it, and
-`memcpy` of overlapping ranges is undefined: the second bug below. The
+`memcpy` of overlapping ranges is undefined: the third bug below. The
 port copies with `memmove`, between two `slice_sub` whose bounds are
 checked:
 
@@ -525,7 +525,7 @@ bytes:
 
 `strlcpy` into `maxsize` bytes keeps `maxsize - 1` of them, so this path
 returns the argument with its last byte cut off and no substitution
-made, and reports no error: the third bug below. The port has no such
+made, and reports no error: the second bug below. The port has no such
 path.
 
 ## In numbers

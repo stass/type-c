@@ -183,11 +183,9 @@ rules of each construct.
   it is rewritten in them; C++ compiles only some C. Type-C's checks
   start in the one file that you rename. Safe Rust and OCaml are memory
   safe, and Type-C is not ([Why not just...](#why-not-just)).
-- **Costs measured against hand-written C.** On a real library, the
-  Type-C rewrite parses as fast as a hand-written C twin, within the
-  noise of the measurement, and its object code is 2.8% (Clang) to
-  11.9% (GCC) larger
-  ([Measured on a real library](#measured-on-a-real-library)).
+- **Costs measured against hand-written C.** A generic map is smaller
+  code than klib's `khash`, 10% faster on Clang and 18% slower on GCC
+  ([Measured on real code](#measured-on-real-code)).
 - **Claims only what is checked.** Each guarantee says what it depends
   on ([principle 5](#principles)), and the tests check each C and Type-C
   example on this page, on GCC and Clang.
@@ -1385,54 +1383,41 @@ includes changes. `-M` and `-MM` print the rule, or write it to the
 Under `-o -` no path names the header, and `-MD` and `-MMD` need `-MT`
 or `-MQ` and `-MF`.
 
-## Measured on a real library
+## Measured on real code
 
-Pilot B, the plan's test of Stage 2 on real code
-([plan, Stage 2](type-c-implementation-plan.md#stage-2-generic-types-result-try-and-defer)),
-rewrote the parser of tomlc99, a TOML library in C (`toml.c`, 2392
-lines), with `result`, `try` and `defer`. Its header `toml.h`, its C
-programs and its tests did not change and link against the Type-C
-object. The pilot's repository is not published; the numbers here are
-from its record.
+[`examples/xargs`](examples/xargs/) ports FreeBSD's `xargs(1)`, the
+one that macOS ships as `/usr/bin/xargs`, function for function. The
+port found three bugs of upstream's, each shown with a transcript
+that runs on the host's own `xargs`
+([what the port found](examples/xargs/README.md#what-the-port-found)):
+`-n` with `-x` gives each command one argument, an `-I` argument of
+exactly `-S` bytes is cut and left unsubstituted, and an argument that
+does not fit is moved with a `memcpy` of overlapping ranges, which
+loses it with musl's `memcpy`. The port's types pointed at the first
+two: the line count, an `int` with 0 for "not given", became an
+`option`, and `strnsubst` returns a `result` and writes into a checked
+slice in place of reporting a truncation beside the string it cut.
+Making the buffer's pointers indices removed the third.
 
-Fault injection fails each allocation of a parse in turn, one run for
-each. Over the library's 62 example files, 1416 runs, the original
-went wrong in 34: 25 leaks and 9 uses after free, from two defects in
-the code that grows an array or a table. The rewrite went wrong in
-none, built by Clang or GCC, and the address, undefined behavior and
-leak sanitizers reported nothing. Over the 146 files of
-toml-spec-tests, 18847 runs, the original leaked in 1022, 1000 of them
-in one deeply nested file, and crashed in 9; the rewrite did neither.
+[`examples/wordfreq`](examples/wordfreq/) measures what generic code
+costs: a word counter on a `map(K, V)` written in Type-C, against the
+same program on klib's `khash.h`, on a text of 20 million words
+([the numbers](examples/wordfreq/README.md#does-generic-code-cost-anything)).
+The generic table is the smaller code on Clang 21 and on GCC 14. It is
+10% faster on Clang, which inlines the hash and the equality, and 18%
+slower on GCC, which calls them through pointers and pays 5% for the
+index checks of the slices.
 
-`try` and `defer` did not remove the defects by themselves. A variant
-of the rewrite whose three faulty functions only put a `try` in place
-of each `if (!x) return` kept all 34 bad runs. Adding a `defer` that
-frees each new object until it is linked into the tree removed the 25
-leaks but not the 9 uses after free, which came from the order of the
-steps: the old buffer of an array was freed before its new element
-existed. Reordering the steps, so that each grown buffer is stored and
-counted before the next allocation, removed them. The language puts
-the question "who owns this object if this step fails?" at every
-`try`; the rewrite had to answer it.
-
-What it costs, at `-O2 -g`, against a hand-written C version of the
-same rewrite with a `goto cleanup` where Type-C has a `defer`:
-
-| | Apple Clang 21 | GCC 16 |
-| --- | --- | --- |
-| text of `toml.o`, over the `goto` version | +528 bytes, +2.8% | +2192 bytes, +11.9% |
-| of which cleanups repeated at each exit | 208 bytes, 1.1% of text | 368 bytes, 2.0% of text |
-| text of `toml.o`, over the original `toml.c` | +480 bytes, +2.6% | +656 bytes, +3.3% |
-| 20 parses of a 1.3 MB document, `goto` version | 0.868 s | 0.962 s |
-| the same, Type-C | 0.870 s | 0.960 s |
-
-The record does not split the rest of the growth further and puts most
-of it down to the representation of `result`, a structure of a tag and
-a union returned by value where the C returns an `int` or a pointer;
-returning a result whose error has no fields as the bare value is open
-in [TODO.md](TODO.md). Parse times are the best
-of five rounds, and repeated runs move each by 2 to 3 percent, more
-than any gap between the versions. Error paths were not timed.
+An unpublished pilot rewrote the parser of tomlc99, a TOML library
+(`toml.c`, 2392 lines), with `result`, `try` and `defer`, behind its
+unchanged header and tests. Failing each allocation of a parse in
+turn, 1416 runs over the library's examples, made the original leak
+or use freed memory in 34 and the rewrite in none. `try` and `defer`
+did not do that alone: the rewrite had to reorder the steps that grow
+an array, so that every grown buffer is stored before the next
+allocation. Its object code grew by 2.6% on Clang and 3.3% on GCC
+over the original's, and a parse took the same time as in a
+hand-written C twin of the rewrite.
 
 ## Principles
 
@@ -1517,7 +1502,7 @@ C clients. The [design](type-c-language-design.md) specifies the whole
 language, and the [plan](type-c-implementation-plan.md) built it in
 stages, each ending in a measured gate, and the three pilots build
 with this release
-([Measured on a real library](#measured-on-a-real-library)).
+([Measured on real code](#measured-on-real-code)).
 
 The test suite passes with Clang and with GCC on macOS, x86-64 and
 arm64, and on Linux, with glibc on x86-64 and with musl on x86-64 and
