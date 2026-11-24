@@ -1396,6 +1396,15 @@ the package, in the order of its commits:
   tried by hand on Clang 21 and GCC 16 and is clean under `-Wall
   -Wextra -pedantic -Wconversion -Wshadow` and Clang's `-Wcomma`;
   Pilot A's 20 predicate functions are the sites to port with it.
+  It is the first addition after 1.0, so the same change makes
+  `__TYPEC__` (design 2.1, now `1`) the release as a number, 100 times
+  the major plus the minor, so a header that uses the form tests
+  `#if __TYPEC__ >= 101`. Derive it at build time from the version of
+  dune-project, its one source (a generator beside `version.ml`'s rule
+  in `src/driver/dune`, failing the build on a minor of 100 or more);
+  keep the tests free of the number (`test_pipeline.ml` builds the
+  flag from `Version`, `pipeline.t` reads the value from typec's
+  output); and update design 2.1, the README and `docs/reference.md`.
 - [Medium] Under `--trap-function` every trap calls `__tc_trap`, which
   is `static`. In an inline definition with external linkage that is a
   C11 6.7.4p3 constraint violation, which GCC 16 reports only as a
