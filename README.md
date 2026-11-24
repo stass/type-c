@@ -183,12 +183,6 @@ rules of each construct.
   it is rewritten in them; C++ compiles only some C. Type-C's checks
   start in the one file that you rename. Safe Rust and OCaml are memory
   safe, and Type-C is not ([Why not just...](#why-not-just)).
-- **Costs measured against hand-written C.** A generic map is smaller
-  code than klib's `khash`, 10% faster on Clang and 18% slower on GCC
-  ([Measured on real code](#measured-on-real-code)).
-- **Claims only what is checked.** Each guarantee says what it depends
-  on ([principle 5](#principles)), and the tests check each C and Type-C
-  example on this page, on GCC and Clang.
 
 ## Principles
 
