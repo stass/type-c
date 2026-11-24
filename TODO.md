@@ -1723,14 +1723,12 @@ types (design 13.3).
 
 - [Medium] Write section 12 (checked mode) of `docs/reference.md`,
   which points to the design instead.
-- [Low] The README states `typec`'s exit statuses in five sections
-  ("Choosing the backend", "Compiling a `.tc` input", "Printing the
-  target model", "Printing the version", "What typec reports"), copies
-  of typec(1)'s EXIT STATUS, which `test/unit/test_manual.ml` checks
-  against the driver while nothing checks the copies. Have the README
-  point to typec(1) for them, as `docs/reference.md` does.
-- [Low] typec(1) (DESCRIPTION) and the README ("Compiling a `.tc`
-  input") call an input a Type-C unit when it ends in `.tc` "with no
+- [Low] The README ("Choosing the backend", "What typec reports") and
+  `docs/reference.md` (13.1 to 13.3) state `typec`'s exit statuses,
+  copies of typec(1)'s EXIT STATUS, which `test/unit/test_manual.ml`
+  checks against the driver while nothing checks the copies. Have them
+  point to typec(1) instead.
+- [Low] typec(1) (DESCRIPTION) and `docs/reference.md` (13.2) call an input a Type-C unit when it ends in `.tc` "with no
   `-x` other than `-x none` before it", but `typec -x c -x none x.tc`
   compiles `x.tc` as Type-C: the rule is that the last `-x` before it,
   if any, is `-x none`. Say so in typec(1) and have the README point
