@@ -1801,7 +1801,7 @@ through the backend.
    names its `.tc` file and every header and interface that it
    includes, as the rule of a `.c` file does. A build tool therefore
    compiles a `.tc` file as it compiles a `.c` file; the
-   [README](../README.md#in-a-build) gives rules for make, ninja and
+   [README](../README.md#integrating-with-a-build-system) gives rules for make, ninja and
    CMake.
 3. The rules of C that `typec` does not check are the backend's: an
    error in the third step comes with the backend's message and status.

@@ -1018,8 +1018,7 @@ theirs, `file:line: error: message` with the line of the source under
 it, and exits with 80. There is a line and no column, so no caret. An
 error under a rule of Type-C ends with the rule's name
 in brackets, the thing to search for: `dune build docs/diagnostics.md`
-writes the catalog of names ([What typec
-reports](../README.md#what-typec-reports)).
+writes the catalog of names.
 
 What stops a build is what you want to stop it. Add a key to the variant,
 and the `match` of `conf_set` names the value that it no longer covers, as
@@ -1081,7 +1080,7 @@ the file lists each `.tci` that a source reads, so that make and ninja
 rebuild what a change reaches. It lists the other files that the
 backend reports as well, among them, with Apple clang, the
 `SDKSettings.json` of the macOS SDK. The README gives the rules for [make,
-ninja and CMake](../README.md#in-a-build), which its tests build with.
+ninja and CMake](../README.md#integrating-with-a-build-system), which its tests build with.
 Here the program is built as objects:
 
 <!-- stage: c8 -->

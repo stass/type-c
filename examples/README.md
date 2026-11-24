@@ -24,7 +24,7 @@ differently, and each runs a check that compares the two.
 
 Each example is a directory with a Makefile for GNU make (`gmake` on
 FreeBSD) that builds with `typec` as the C compiler and the rule of the
-main [README](../README.md#in-a-build). The C original builds with the
+main [README](../README.md#integrating-with-a-build-system). The C original builds with the
 same `typec`, which hands a `.c` file to the C compiler untouched.
 
 ```sh

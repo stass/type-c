@@ -284,8 +284,8 @@ command, replies `500 Command unrecognized` to them, and would run them
 if they spelled one. No compiler says a word about it.
 
 `typec` refuses the program at each `match` on the state that misses
-`Auth`. It stops at the first error of a unit (main
-[README](../../README.md#what-typec-reports)), so it names them one
+`Auth`. It stops at the first error of a unit ([tutorial,
+chapter 7](../../docs/tutorial.md#7-reading-the-errors-and-the-c)), so it names them one
 build at a time: `mail`, and once `mail` handles `Auth`, `serve`:
 
 ```console

@@ -8,7 +8,7 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 The tools that check `typec` beyond `dune test`: the test hosts, the
 fuzz harness, the corpus runner, the typing oracle and the measurements
 against hand-written C. How to build `typec` and run its tests is in the
-[README](../README.md#building-and-testing).
+[README](../README.md#developing-and-testing).
 
 ## The gate and the tests
 

@@ -1723,7 +1723,7 @@ types (design 13.3).
 
 - [Medium] Write section 12 (checked mode) of `docs/reference.md`,
   which points to the design instead.
-- [Low] The README ("Choosing the backend", "What typec reports") and
+- [Low] The README ("Choosing the backend") and
   `docs/reference.md` (13.1 to 13.3) state `typec`'s exit statuses,
   copies of typec(1)'s EXIT STATUS, which `test/unit/test_manual.ml`
   checks against the driver while nothing checks the copies. Have them

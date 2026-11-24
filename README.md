@@ -21,20 +21,36 @@ one file at a time.
 Type-C is early: every example on this page works today, and the rest
 of the language is designed but not built yet ([Status](#status)).
 
-## Installing
+## Try it
 
-With [Homebrew](https://brew.sh), on macOS or Linux:
+Install `typec` with [Homebrew](https://brew.sh), on macOS or Linux:
 
 ```sh
 brew install stass/tap/typec
-typec --version
 man typec
 ```
 
-Homebrew builds `typec` from the release source with OCaml and dune.
-`typec` hands its C to `cc` unless told otherwise
-([Choosing the backend](#choosing-the-backend)). To build it from a
-checkout instead, see [Try it](#try-it).
+Or build it from a checkout, with OCaml 5.4, dune 3 and a GCC or Clang
+of the releases that [Choosing the backend](#choosing-the-backend)
+names:
+
+```sh
+dune build --root .
+export PATH="$PWD/_build/install/default/bin:$PATH"
+```
+
+Then:
+
+```sh
+typec -c file.tc         # compile a Type-C file, as cc compiles C
+typec --emit-c file.tc   # print the C that typec hands to cc
+make CC=typec            # build with typec as the C compiler
+```
+
+`typec` hands its C to `cc` unless `--cc=PATH` or `TYPEC_CC` names
+another compiler. [A first look](#a-first-look) and the sections after
+it give programs to try, and [`examples/`](examples/) holds larger
+ones, each beside the C that it ports.
 
 ## A first look
 
@@ -261,7 +277,7 @@ a word: as an error that the section shows, or by making the mistake
 impossible to write. Where a C warning catches a form of it, the
 section says which. The messages are those that `typec` prints, with
 its exit
-status in brackets ([What typec reports](#what-typec-reports)). The
+status in brackets. The
 cases of a variant are its *constructors*, as the messages call them.
 
 ### Variants and `match`
@@ -787,77 +803,6 @@ file, and Type-C code that reinterprets storage, as `*(port *)p` does,
 is not refused. The guarantees and what each depends on are in [design
 14](type-c-language-design.md#14-guarantees).
 
-## Try it
-
-You need OCaml, dune and a GCC or Clang, of the releases that
-[Choosing the backend](#choosing-the-backend) names. From a checkout,
-with the examples above saved under their names:
-
-```sh
-dune build --root .
-export PATH="$PWD/_build/install/default/bin:$PATH"
-typec -c area.tc         # a match that misses a case
-typec -c shape.c         # a C file compiles as with cc
-typec --emit-c token.tc  # print the C that typec hands to cc
-```
-
-`typec` takes the command line of `cc`, so an existing build runs with
-`CC=typec` and its C files compile as before.
-
-[`examples/`](examples/) holds larger programs, each beside the C that
-it ports, such as FreeBSD's `cut(1)`.
-
-## Measured on real code
-
-[`examples/xargs`](examples/xargs/) ports FreeBSD's `xargs(1)`, the
-one that macOS ships as `/usr/bin/xargs`, function for function. The
-port's types found two bugs in the original
-([what the port found](examples/xargs/README.md#what-the-port-found)):
-
-- `xargs -n 3 -x` runs each command with one argument, not three.
-  The port's `option(int)` line count cannot be mistaken for a number.
-- `-I {} -S 5` cuts a 5-byte argument such as `ab{}c` to `ab{}`
-  without replacing `{}`. The port's `strnsubst` returns a `result`.
-
-[`examples/wordfreq`](examples/wordfreq/) measures what generic code
-costs: a word counter on a `map(K, V)` written in Type-C, against the
-same program on klib's `khash.h`, on a text of 20 million words
-([the numbers](examples/wordfreq/README.md#does-generic-code-cost-anything)).
-The generic table is the smaller code on Clang 21 and on GCC 14. It is
-10% faster on Clang, which inlines the hash and the equality, and 18%
-slower on GCC, which calls them through pointers and pays 5% for the
-index checks of the slices.
-
-An unpublished pilot rewrote the parser of tomlc99, a TOML library
-(`toml.c`, 2392 lines), with `result`, `try` and `defer`, behind its
-unchanged header and tests. Failing each allocation of a parse in
-turn, 1416 runs over the library's examples, made the original leak
-or use freed memory in 34 and the rewrite in none. `try` and `defer`
-did not do that alone: the rewrite had to reorder the steps that grow
-an array, so that every grown buffer is stored before the next
-allocation. Its object code grew by 2.6% on Clang and 3.3% on GCC
-over the original's, and a parse took the same time as in a
-hand-written C twin of the rewrite.
-
-## Status
-
-Type-C 1.0 is the core language, frozen: variants, `match`,
-`if (case ...)` and nested patterns, distinct types, `private` and
-interface files (`.tci`), generic types and functions, `option` and
-`result`, `try` and `defer`, and slices with checked indexing and
-`str`. `typec --emit-c-header` writes the C header of an interface for
-C clients. The [design](type-c-language-design.md) specifies the whole
-language, and the [plan](type-c-implementation-plan.md) built it in
-stages, each ending in a measured gate.
-
-The test suite passes with Clang and with GCC on macOS, x86-64 and
-arm64, and on Linux, with glibc on x86-64 and with musl on x86-64 and
-arm64 ([Building and testing](#building-and-testing)).
-
-Designed and **not yet implemented**: a checked mode, whose rules are
-provisional, that rules out specific classes of memory errors in the
-functions it covers (Stage 5 of the plan).
-
 ## Adopting one file
 
 Type-C enters a program one file at a time. Take a small C program:
@@ -973,7 +918,7 @@ A command added to `command` later, such as `Mul(long n)`, stops the
 build at every `match` that does not handle it.
 
 A build compiles `calc.tc` with `typec`, and its other files as before
-([In a build](#in-a-build)).
+([Integrating with a build system](#integrating-with-a-build-system)).
 
 Any C11 file is already a Type-C file with the same meaning
 ([design 2.2](type-c-language-design.md#22-type-c-is-a-superset-of-c11)),
@@ -1007,7 +952,119 @@ Debuggers step through the lines of the `.tc` file; the debug
 information still differs from a direct compile
 ([TODO.md](TODO.md#driver)).
 
-### In a build
+## Using Type-C types from C
+
+C code sees what [design
+10.6](type-c-language-design.md#106-what-c-code-sees) lists: a variant
+is the structure that [What the C looks like](#what-the-c-looks-like)
+shows, a distinct type is the type it is made from, and a function is
+the same C function. The C compiler lays out both sides, so they agree:
+[`test/run/abi.t`](test/run/abi.t) links objects that `typec` builds
+with objects of the C compiler alone, in every pairing of GCC and Clang,
+and passes variants with fields of each class of C object type both
+ways, the C side reading them through a structure written by hand as
+[design 10.1](type-c-language-design.md#101-variants) gives it.
+
+One header can serve both kinds of file. `typec` defines `__TYPEC__`
+while it preprocesses a Type-C unit, so the header can give Type-C
+files a distinct type where C files see a plain `typedef`
+([design 2.1](type-c-language-design.md#21-files)). Both have the same
+representation, so both call the same function, and only the Type-C
+side gets the check:
+
+<!-- file: user.h -->
+```c
+#ifdef __TYPEC__
+type user_id = distinct unsigned;	/* in .tc files */
+#else
+typedef unsigned user_id;		/* in .c files */
+#endif
+
+int user_is_root(user_id u);
+```
+
+<!-- file: user.tc -->
+```c
+#include "user.h"
+
+int
+user_is_root(user_id u)
+{
+	return (u == (user_id)0);
+}
+```
+
+<!-- file: admin.c -->
+```c
+#include <stdio.h>
+#include "user.h"
+
+int
+main(void)
+{
+	printf("%d\n", user_is_root(0));
+	return (0);
+}
+```
+
+```console
+$ typec -Wall -Wextra user.tc admin.c -o admin
+$ ./admin
+1
+```
+
+`typec --emit-c-header M.tci` writes `M.h`, the C header of a `.tci`
+interface, so that C code gets its variants without a structure written
+by hand ([design 9.3](type-c-language-design.md#93-c-clients)). A Type-C
+unit that includes `M.h` reads `M.tci` itself. The dependency options
+work as for a `.tc` file
+([reference 10.2](docs/reference.md#102-headers)).
+
+## Choosing the backend
+
+`typec` runs the C compiler that the last `--cc=PATH` names, else the
+one that `TYPEC_CC` names, else `cc`. It must be GCC or Clang, Apple's
+included, no older than the releases that `minimum_major_version` in
+[src/sema/target.ml](src/sema/target.ml) names. `TYPEC_CC` names one
+program, so it cannot be `ccache gcc`. To install `typec` as `cc`, set
+`TYPEC_CC` to the real C compiler: a backend that runs `typec` again
+is refused.
+
+`typec`'s own exit statuses are 80 when it refuses the program, 81 for
+an error of the command line or the environment, and 82 for a bug in
+`typec`; every other status is the backend's.
+[Reference 13.1](docs/reference.md#131-the-backend) gives the rules in
+full.
+
+## Compiling a `.tc` input
+
+`typec` compiles a `.tc` file in three steps:
+
+1. the backend preprocesses it, with `__TYPEC__` defined;
+2. `typec` checks the preprocessed text and lowers it to C11;
+3. the backend compiles that C under the options of the command line.
+
+The outputs are those of a `.c` file, under the same names: an object,
+the assembly of `-S`, a linked program, the dependency file of `-MD`
+or `-MMD`. Every other input goes to the backend untouched.
+
+For a `.tc` file `typec` adds these options, among those that
+[typec(1)](docs/typec.1) lists:
+
+- `--emit-c` writes the C of step 2 in place of compiling it;
+- `--trap-function=NAME` makes a failed check call `NAME` in place of
+  `__builtin_trap()`, for freestanding code;
+- `--print-target` prints the target model for which step 2 reads the
+  file;
+- `--stats` prints the sizes that `typec` counts against its limits.
+
+With a `.tc` input it refuses the options it cannot follow, such as
+`-E`, `-save-temps` and `-funsigned-bitfields`.
+[Reference 13.2](docs/reference.md#132-compiling-a-tc-input) gives the
+exact backend commands, each refused option with its reason, and the
+exit statuses.
+
+## Integrating with a build system
 
 In a build, `typec` is the C compiler, with the backend that `TYPEC_CC`
 names ([Choosing the backend](#choosing-the-backend)). It hands
@@ -1086,6 +1143,38 @@ as C, as the C compiler would take it. The tests
 [`ninja_rule.t`](test/run/ninja_rule.t) and
 [`cmake_rule.t`](test/run/cmake_rule.t) build with these rules on both
 backends, where the host has the tool.
+
+## Measured on real code
+
+[`examples/xargs`](examples/xargs/) ports FreeBSD's `xargs(1)`, the
+one that macOS ships as `/usr/bin/xargs`, function for function. The
+port's types found two bugs in the original
+([what the port found](examples/xargs/README.md#what-the-port-found)):
+
+- `xargs -n 3 -x` runs each command with one argument, not three.
+  The port's `option(int)` line count cannot be mistaken for a number.
+- `-I {} -S 5` cuts a 5-byte argument such as `ab{}c` to `ab{}`
+  without replacing `{}`. The port's `strnsubst` returns a `result`.
+
+[`examples/wordfreq`](examples/wordfreq/) measures what generic code
+costs: a word counter on a `map(K, V)` written in Type-C, against the
+same program on klib's `khash.h`, on a text of 20 million words
+([the numbers](examples/wordfreq/README.md#does-generic-code-cost-anything)).
+The generic table is the smaller code on Clang 21 and on GCC 14. It is
+10% faster on Clang, which inlines the hash and the equality, and 18%
+slower on GCC, which calls them through pointers and pays 5% for the
+index checks of the slices.
+
+An unpublished pilot rewrote the parser of tomlc99, a TOML library
+(`toml.c`, 2392 lines), with `result`, `try` and `defer`, behind its
+unchanged header and tests. Failing each allocation of a parse in
+turn, 1416 runs over the library's examples, made the original leak
+or use freed memory in 34 and the rewrite in none. `try` and `defer`
+did not do that alone: the rewrite had to reorder the steps that grow
+an array, so that every grown buffer is stored before the next
+allocation. Its object code grew by 2.6% on Clang and 3.3% on GCC
+over the original's, and a parse took the same time as in a
+hand-written C twin of the rewrite.
 
 ## What the C looks like
 
@@ -1208,146 +1297,30 @@ compilers and compared in code size and in the instructions they retire
 The cost of the checks themselves, and what is not measured yet, are
 open in [TODO.md](TODO.md).
 
-## Using Type-C types from C
+## Status
 
-C code sees what
-[design 10.6](type-c-language-design.md#106-what-c-code-sees) lists: a
-variant is the structure shown above, a distinct type is the type it is
-made from, and a function is the same C function. The C compiler lays
-out both sides, so they agree:
-[`test/run/abi.t`](test/run/abi.t) links objects that `typec` builds
-with objects of the C compiler alone, in every pairing of GCC and
-Clang, and passes variants with fields of each class of C object type
-both ways, the C side reading them through a structure written by hand
-as [design 10.1](type-c-language-design.md#101-variants) gives it.
+Type-C 1.0 is the core language, frozen: variants, `match`,
+`if (case ...)` and nested patterns, distinct types, `private` and
+interface files (`.tci`), generic types and functions, `option` and
+`result`, `try` and `defer`, and slices with checked indexing and
+`str`. `typec --emit-c-header` writes the C header of an interface for
+C clients. The [design](type-c-language-design.md) specifies the whole
+language, and the [plan](type-c-implementation-plan.md) built it in
+stages, each ending in a measured gate.
 
-One header can serve both kinds of file. `typec` defines `__TYPEC__`
-while it preprocesses a Type-C unit, so the header can give Type-C
-files a distinct type where C files see a plain `typedef`
-([design 2.1](type-c-language-design.md#21-files)). Both have the same
-representation, so both call the same function, and only the Type-C
-side gets the check:
+The test suite passes with Clang and with GCC on macOS, x86-64 and
+arm64, and on Linux, with glibc on x86-64 and with musl on x86-64 and
+arm64 ([Developing and testing](#developing-and-testing)).
 
-<!-- file: user.h -->
-```c
-#ifdef __TYPEC__
-type user_id = distinct unsigned;	/* in .tc files */
-#else
-typedef unsigned user_id;		/* in .c files */
-#endif
+Designed and **not yet implemented**: a checked mode, whose rules are
+provisional, that rules out specific classes of memory errors in the
+functions it covers (Stage 5 of the plan).
 
-int user_is_root(user_id u);
-```
+## Developing and testing
 
-<!-- file: user.tc -->
-```c
-#include "user.h"
-
-int
-user_is_root(user_id u)
-{
-	return (u == (user_id)0);
-}
-```
-
-<!-- file: admin.c -->
-```c
-#include <stdio.h>
-#include "user.h"
-
-int
-main(void)
-{
-	printf("%d\n", user_is_root(0));
-	return (0);
-}
-```
-
-```console
-$ typec -Wall -Wextra user.tc admin.c -o admin
-$ ./admin
-1
-```
-
-`typec --emit-c-header M.tci` writes `M.h`, the C header of a `.tci`
-interface, so that C code gets its variants without a structure written
-by hand ([design 9.3](type-c-language-design.md#93-c-clients)). A Type-C
-unit that includes `M.h` reads `M.tci` itself. The dependency options
-work as for a `.tc` file
-([reference 10.2](docs/reference.md#102-headers)).
-
-## Choosing the backend
-
-`typec` runs the C compiler that the last `--cc=PATH` names, else the
-one that `TYPEC_CC` names, else `cc`. It must be GCC or Clang, Apple's
-included, no older than the releases that `minimum_major_version` in
-[src/sema/target.ml](src/sema/target.ml) names. `TYPEC_CC` names one
-program, so it cannot be `ccache gcc`. To install `typec` as `cc`, set
-`TYPEC_CC` to the real C compiler: a backend that runs `typec` again
-is refused.
-
-`typec`'s own exit statuses are 80 when it refuses the program, 81 for
-an error of the command line or the environment, and 82 for a bug in
-`typec`; every other status is the backend's.
-[Reference 13.1](docs/reference.md#131-the-backend) gives the rules in
-full.
-
-## Compiling a `.tc` input
-
-`typec` compiles a `.tc` file in three steps:
-
-1. the backend preprocesses it, with `__TYPEC__` defined;
-2. `typec` checks the preprocessed text and lowers it to C11;
-3. the backend compiles that C under the options of the command line.
-
-The outputs are those of a `.c` file, under the same names: an object,
-the assembly of `-S`, a linked program, the dependency file of `-MD`
-or `-MMD`. Every other input goes to the backend untouched.
-
-For a `.tc` file `typec` adds these options, among those that
-[typec(1)](docs/typec.1) lists:
-
-- `--emit-c` writes the C of step 2 in place of compiling it;
-- `--trap-function=NAME` makes a failed check call `NAME` in place of
-  `__builtin_trap()`, for freestanding code;
-- `--print-target` prints the target model for which step 2 reads the
-  file;
-- `--stats` prints the sizes that `typec` counts against its limits.
-
-With a `.tc` input it refuses the options it cannot follow, such as
-`-E`, `-save-temps` and `-funsigned-bitfields`.
-[Reference 13.2](docs/reference.md#132-compiling-a-tc-input) gives the
-exact backend commands, each refused option with its reason, and the
-exit statuses.
-
-## What typec reports
-
-`typec` stops at the first error, prints it as `file:line: error:
-message` with the source line under it, and exits with status 80. The
-line has no column, because the C compiler preprocesses the source
-([design
-13.6](type-c-language-design.md#136-diagnostics-and-debugging)). An
-error under a rule of Type-C ends with the rule's name in brackets, such
-as [match-arm-end]; `dune build docs/diagnostics.md` writes the
-catalogue of rules. A message about no place in the source, such as one
-about the command line, begins with `typec:`. An error in the C that
-`typec` writes comes with the C compiler's message and status.
-[`test/run/readme.t`](test/run/readme.t) checks every example on this
-page on GCC and Clang.
-
-## Printing the version
-
-`typec --version` prints the backend's `--version` output, then
-`typec` and its release on a last line, such as `typec 1.0`, so that a
-build tool that identifies `$CC` by that output, such as Meson, sees
-the backend. [typec(1)](docs/typec.1) gives its exit status.
-
-## Building and testing
-
-Requirements: OCaml 5.4 and dune 3, and for the tests a Clang and a
-GCC of releases that `typec` supports. There are no other
-dependencies. [Test backends](docs/development.md#test-backends) says
-which compilers the tests run, and how a host requires or skips each.
+Building from a checkout needs OCaml 5.4 and dune 3, and the tests a
+Clang and a GCC of releases that `typec` supports; there are no other
+dependencies.
 
 ```sh
 dune build    # builds typec as _build/install/default/bin/typec
@@ -1356,16 +1329,12 @@ TYPEC_TEST_GCC=/usr/bin/gcc dune test   # with another GCC
 ```
 
 `dune exec typec -- ARGS` runs the compiler from the build tree.
-
 `tools/gate.sh` runs the full suite, the typing oracle's tests
 included, which `dune test` skips; run it before a commit.
-[Developing typec](docs/development.md#the-gate-and-the-tests)
-describes what it runs and how the tests are laid out.
 
-## Developing typec
-
-The test hosts, fuzzing, the corpus runner, the typing oracle and the
-measurements against hand-written C are described in
-[docs/development.md](docs/development.md). The order of work is the
+[docs/development.md](docs/development.md) describes the gate, the
+layout of the tests, the compilers they run, the test hosts, fuzzing,
+the corpus runner, the typing oracle and the measurements against
+hand-written C. The order of work is the
 [implementation plan](type-c-implementation-plan.md), and open work is
 in [TODO.md](TODO.md).
