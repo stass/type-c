@@ -1127,7 +1127,7 @@ $ nm -u ring.o | grep -cE '(^| )_?fail$'
 
 Such an object needs from its environment what the same C needs, and
 nothing that the program did not write
-([Compiling a `.tc` input](../README.md#compiling-a-tc-input);
+([Compiling a `.tc` input](reference.md#132-compiling-a-tc-input);
 `test/run/freestanding.t` links with `-nostdlib`).
 
 Next: the README says what each feature rules out, and what is not

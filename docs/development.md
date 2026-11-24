@@ -10,6 +10,82 @@ fuzz harness, the corpus runner, the typing oracle and the measurements
 against hand-written C. How to build `typec` and run its tests is in the
 [README](../README.md#building-and-testing).
 
+## The gate and the tests
+
+`tools/gate.sh` is the command to run before a commit: it runs `dune build`,
+`dune build @check` and `dune test`, then builds the typing oracle and
+runs its tests, which `dune test` skips (see
+[Typing oracle](#typing-oracle)). It needs the opam
+switch `tools` and fails, saying where to find how to create it, when the
+switch is missing. Before its steps it prints that report, which
+`dune test` writes only to the log, so a skipped Arm backend shows, and
+stops where a `TYPEC_TEST_REQUIRE_*` variable of `test/run/backends.sh`
+names one that is missing. It prints the end
+of the log when a step fails; the variables in the header of the script
+set the opam root, the oracle's build directory and the log.
+
+Library tests are in `test/unit`; the parser's are tables of C text and
+the structural dump of its tree (`test/support/tree_dump.ml`) or its
+error. `test_deep_trees` runs every chain that the parser reads in a
+loop (`test/support/chains.ml`), as deep as `Parser.max_depth` lets it,
+through the stages after the parser on a stack limited to 256K words of
+amd64 frames (more where a frame is larger).
+`test/golden` holds cram tests that show the C or the diagnostic
+that the front end gives for a source, with no backend
+(`test/golden/golden.ml`); `dune test test/golden` runs them and
+`dune promote` takes a changed output. Every rule that typec enforces has
+a stable name in the one table `src/syntax/rule_table/rule_table.ml`,
+which generates the module `Rule` and the catalogue
+`_build/default/docs/diagnostics.md` (`dune build docs/diagnostics.md`);
+`test/golden/coverage.ml` fails while some rule's name appears in no
+golden output, so a new rule needs a golden case, and
+`test/golden/citations.ml` fails while an expected output of a golden
+or run test says the word "design": a diagnostic says what is wrong in
+the terms of the user's text, and its rule name is the reference.
+`test/run` holds cram tests that run `typec` and the backends;
+`types.t` and `declarations.t` compile static assertions of what typec
+computes, so a backend that disagrees fails to compile them.
+`test/misuse` holds OCaml that an interface must refuse; each file names
+its library and the expected error text in a `(* misuse: LIBRARY TEXT *)`
+line, and passes only when `ocamlc` rejects it with that text.
+
+## Test backends
+
+The tests need a C compiler as `cc`, a Clang and a GCC of releases that
+`typec` supports (see [Choosing the
+backend](../README.md#choosing-the-backend)), and
+`tools/corpus/runner.t` runs `/usr/bin/clang`. The cram tests in
+`test/run` run the Clang that `TYPEC_TEST_CLANG` names and the GCC that
+`TYPEC_TEST_GCC` names; unset, they are `/usr/bin/clang` and the
+`gcc-16` on the `PATH`, those of a macOS host with Homebrew's GCC
+(`test/run/backends.sh`). `headers.t` parses and reads the declarations
+of every C11 and POSIX header that each backend's system headers hold.
+`target.t` expects the model of x86-64, of arm64 Linux or of arm64
+macOS, and `types.t`, `declarations.t` and `expressions.t` compile for
+the host's target and for a second one, `-m32` on x86-64 and the other
+signedness of plain char elsewhere (`second_target` in
+`test/run/backends.sh`). A host without the C headers of i386 runs the
+tests that include the C headers (`abi.t`) with the other signedness of
+plain char instead of `-m32`, and `dune test` prints a line saying so. A
+host that has them sets `TYPEC_TEST_REQUIRE_M32` to a non-empty value,
+and `dune test` then fails when the backends do not both compile
+`<limits.h>` with `-m32`; the check is a rule of `test/run/dune`, so a
+run of one test alone (`dune test test/run/abi.t`) skips it.
+`short_enums.t` and `c_header.t` also run the `arm-none-eabi-gcc` that
+`TYPEC_TEST_ARM_GCC` names, or the one on the `PATH`, where present, and
+Clang for `thumbv7m-none-eabi` where Clang has that target. The rule
+that reports `-m32` also prints which of the two Arm backends ran and
+which were skipped, and fails when one is missing and
+`TYPEC_TEST_REQUIRE_ARM` is set to a non-empty value. `tutorial.t` runs
+its lldb examples where the `lldb` on the `PATH` debugs the programs of
+both backends; the same rule prints whether they run on this host, and
+fails when they do not and `TYPEC_TEST_REQUIRE_LLDB` is set to a
+non-empty value. The sanitized tests add AddressSanitizer and
+UndefinedBehaviorSanitizer on each backend that links them; the rule
+prints whether each backend does, and fails when one does not and
+`TYPEC_TEST_REQUIRE_SANITIZERS` is set to a non-empty value. There are
+no other dependencies.
+
 ## Linux test hosts
 
 `tools/hosts` describes each Linux host that the suite runs on as a
@@ -822,3 +898,17 @@ tools/measure/try_expr.sh /Volumes/Optaine/measure-3.12/run/try_expr.csv
 tools/measure/try_stats.sh /Volumes/Optaine/measure-3.12/run/try_stats.csv \
     /usr/bin/clang
 ```
+
+## The manual page
+
+`docs/typec.1`, in mdoc(7), is installed by `dune install` as
+`man/man1/typec.1` under the prefix, or under the directory of
+`--mandir`. `test/unit/test_manual.ml` checks its lists of `typec`'s
+options and exit statuses against the driver's tables, and
+`mandoc -Tlint -Wwarning docs/typec.1` checks its markup.
+
+## Releasing
+
+The release has one source, the `version` field of `dune-project`,
+which the build writes into `typec`; the release tag `vX.Y` is made
+after it is set.

@@ -377,25 +377,7 @@ ids.tc:9: error: a value of type 'group_id' does not convert to 'user_id' withou
 ```
 
 With C's `typedef`, the swap compiles, and no warning flag that
-`comparison.t` tries catches it:
-
-<!-- file: ids.c -->
-```c
-typedef unsigned user_id;
-typedef unsigned group_id;
-
-int is_member(user_id u, group_id g);
-
-int
-may_read(user_id u, group_id g)
-{
-	return (is_member(g, u));	/* swapped */
-}
-```
-
-```console
-$ cc -std=c11 -Wall -Wextra -c ids.c
-```
+`comparison.t` tries catches it.
 
 ### Private types and interfaces
 
@@ -452,32 +434,8 @@ server.tc:7: error: the distinct type 'port' is private to 'include/port.tci', s
 [80]
 ```
 
-In C, the rule is a comment:
-
-<!-- file: port.h -->
-```c
-#include <stdint.h>
-
-typedef uint16_t port;	/* make one with port_parse only */
-
-port port_parse(const char *text);
-```
-
-<!-- file: server.c -->
-```c
-#include <stdlib.h>
-#include "port.h"
-
-port
-port_from_argument(const char *argument)
-{
-	return (atoi(argument));	/* skips the check */
-}
-```
-
-```console
-$ cc -std=c11 -Wall -Wextra -c server.c
-```
+In C, the rule is a comment on the `typedef`, and the same
+`port_from_argument` compiles without a warning.
 
 ### Generic types
 
@@ -520,37 +478,8 @@ list.tc:18: error: a value of type 'list(double)' does not convert to 'list(int)
 [80]
 ```
 
-The C list of `void *` takes any element:
-
-<!-- file: list.c -->
-```c
-#include <stddef.h>
-
-struct list {
-	void		*head;
-	struct list	*tail;
-};
-
-int
-sum(struct list l)
-{
-	int total = 0;
-
-	for (struct list *p = &l; p != NULL; p = p->tail)
-		total += *(int *)p->head;
-	return (total);
-}
-
-int
-sum_prices(struct list prices)
-{
-	return (sum(prices));	/* a list of doubles */
-}
-```
-
-```console
-$ cc -std=c11 -Wall -Wextra -c list.c
-```
+A C list of `void *` takes any element, and the same `sum_prices`
+compiles without a warning.
 
 ### `option`
 
@@ -956,7 +885,8 @@ The fine print, for a `.tc` file:
 - `__FILE__` names the `.tc` file, as it names any renamed file.
 - A few options are refused, among them `-E`, `-save-temps`,
   `-funsigned-bitfields` and more than one `-arch`
-  ([Compiling a `.tc` input](#compiling-a-tc-input) lists them).
+  ([reference 13.2](docs/reference.md#132-compiling-a-tc-input)
+  lists them).
 - The C compiler reads preprocessed text, so its warnings that depend on
   where a macro came from or on comments can differ from a direct
   compile
@@ -1059,23 +989,16 @@ backends, where the host has the tool.
 
 ## What typec reports
 
-`typec` stops at the first error it finds, prints it as GCC and Clang
-print theirs, `file:line: error: message` with the line of the source
-under it, and exits with status 80. The line has no caret: the C
-compiler preprocesses the source, so the error names a line and no
-column ([design
-13.6](type-c-language-design.md#136-diagnostics-and-debugging)). An
-error under a rule of Type-C ends with the rule's name in brackets, as
-[match-arm-end], the way GCC ends a warning with its option; the
-catalogue of diagnostics (`dune build docs/diagnostics.md` writes it to
-`_build/default/docs/diagnostics.md`) gives each name's rule and the
-section of the [design](type-c-language-design.md) that states it. A
-message about no place in the source, as one about the command line,
-begins with `typec:` instead. An error
-that the C compiler finds in the C that `typec` writes, as with the
-generic types above, comes with the C compiler's message and status.
-[`test/run/readme.t`](test/run/readme.t) checks the files and the output
-of every C and Type-C example on this page, on GCC and Clang.
+`typec` stops at the first error, prints it as `file:line: error:
+message` with the source line under it, and exits with status 80. The
+line has no column, because the C compiler preprocesses the source
+([design 13.6](type-c-language-design.md#136-diagnostics-and-debugging)).
+An error under a rule of Type-C ends with the rule's name in brackets,
+such as [match-arm-end]; `dune build docs/diagnostics.md` writes the
+catalogue of rules. An error in the C that `typec` writes comes with
+the C compiler's message and status.
+[`test/run/readme.t`](test/run/readme.t) checks every example on this
+page on GCC and Clang.
 
 ## What the C looks like
 
@@ -1190,115 +1113,6 @@ statement at each exit of its scope, in reverse order, after the value
 of a `return` is computed: the C of early returns that each release
 what is held, with no table, unwinding or allocation.
 
-<details>
-<summary>The C of <code>try</code> and <code>defer</code></summary>
-
-<!-- file: pair.tc -->
-```c
-type error = | Busy;
-
-result(int, error) acquire(int id);
-void release(int handle);
-result(void, error) join(int a, int b);
-
-result(void, error)
-pair(void)
-{
-	int a, b;
-
-	a = try acquire(1);
-	defer release(a);
-	b = try acquire(2);
-	defer release(b);
-	return (join(a, b));
-}
-```
-
-`typec --emit-c pair.tc` writes this, here without its line markers and
-laid out for reading:
-
-<!-- emit-c: pair.tc -->
-```c
-struct error; typedef struct error error;
-enum error_tag { error_Busy, __tc_tag_max__error_tag = 2147483647 };
-struct error { enum error_tag tag; };
-
-typedef int __tc_arg__i;
-struct error; typedef struct error __tc_arg__5error;
-struct result__i5error; typedef struct result__i5error result__i5error;
-
-result__i5error acquire(int id);
-void release(int handle);
-
-typedef void __tc_arg__v;
-struct result__v5error; typedef struct result__v5error result__v5error;
-
-result__v5error join(int a, int b);
-
-enum result__v5error_tag {
-  result__v5error_Err, result__v5error_Ok,
-  __tc_tag_max__result__v5error_tag = 2147483647
-};
-struct result__v5error {
-  enum result__v5error_tag tag;
-  union {
-    struct { __tc_arg__5error error; } Err;
-  } u;
-};
-enum result__i5error_tag {
-  result__i5error_Err, result__i5error_Ok,
-  __tc_tag_max__result__i5error_tag = 2147483647
-};
-struct result__i5error {
-  enum result__i5error_tag tag;
-  union {
-    struct { __tc_arg__5error error; } Err;
-    struct { __tc_arg__i value; } Ok;
-  } u;
-};
-
-result__v5error
-pair(void)
-{
-  typedef __typeof__(((__typeof__(pair) *)0)()) __tc_ret;
-  {
-    int a, b;
-
-    struct result__i5error __tc_t0 = (acquire(1));
-    if (__tc_t0.tag != result__i5error_Ok) {
-      if (__tc_t0.tag != result__i5error_Err)
-        __builtin_trap();
-      return ((struct result__v5error){
-          .tag = result__v5error_Err, .u.Err = { __tc_t0.u.Err.error } });
-    }
-    a = __tc_t0.u.Ok.value;
-
-    struct result__i5error __tc_t1 = (acquire(2));
-    if (__tc_t1.tag != result__i5error_Ok) {
-      if (__tc_t1.tag != result__i5error_Err)
-        __builtin_trap();
-      { release(a); }
-      return ((struct result__v5error){
-          .tag = result__v5error_Err, .u.Err = { __tc_t1.u.Err.error } });
-    }
-    b = __tc_t1.u.Ok.value;
-
-    {
-      __tc_ret __tc_r0 = ((join(a, b)));
-      { release(b); }
-      { release(a); }
-      return __tc_r0;
-    }
-    __builtin_trap();
-  }
-}
-```
-
-A tag that is neither `Ok` nor `Err` traps, as in every `match`, and so
-does the end of the function, which no path reaches.
-
-</details>
-
 The lowering is measured against hand-written C: Type-C programs and C
 twins of them, which carry the same checks (the trap of a `match` on a
 bad tag, the copies of the bound fields), are built at `-O2` with both
@@ -1372,16 +1186,8 @@ $ ./admin
 interface, so that C code gets its variants without a structure written
 by hand ([design 9.3](type-c-language-design.md#93-c-clients)). A Type-C
 unit that includes `M.h` reads `M.tci` itself. The dependency options
-work as for a `.tc` file, with the header as the target of the rule,
-which names `M.tci` and every file that it includes: `-MD` and `-MMD`
-write the rule to `M.h.d`, the header's path followed by `.d`, or to
-the file that `-MF` names, so a makefile rule `M.h: M.tci` whose
-command is `typec --emit-c-header -MMD -MP M.tci`, with `-include
-M.h.d` beside it, rebuilds `M.h` when an interface that `M.tci`
-includes changes. `-M` and `-MM` print the rule, or write it to the
-`-MF` file, and write no header, so they cannot be used with `-o`.
-Under `-o -` no path names the header, and `-MD` and `-MMD` need `-MT`
-or `-MQ` and `-MF`.
+work as for a `.tc` file
+([reference 10.2](docs/reference.md#102-headers)).
 
 ## Measured on real code
 
@@ -1509,7 +1315,7 @@ functions it covers (Stage 5 of the plan).
 ## Try it
 
 You need OCaml, dune and a GCC or Clang, of the releases that
-[Building and testing](#building-and-testing) names. From a checkout,
+[Choosing the backend](#choosing-the-backend) names. From a checkout,
 with the examples above saved under their names:
 
 ```sh
@@ -1534,41 +1340,10 @@ it ports, such as FreeBSD's `cut(1)`.
 
 ## Building and testing
 
-Requirements: OCaml 5.4 and dune 3; the tests also need a C compiler as
-`cc`, a Clang and a GCC of releases that `typec` supports (see
-[Choosing the backend](#choosing-the-backend)), and `tools/corpus/runner.t` runs
-`/usr/bin/clang`. The cram tests in `test/run` run the Clang that
-`TYPEC_TEST_CLANG` names and the GCC that `TYPEC_TEST_GCC` names; unset,
-they are `/usr/bin/clang` and the `gcc-16` on the `PATH`, those of a
-macOS host with Homebrew's GCC (`test/run/backends.sh`). `headers.t` parses
-and reads the declarations of every C11 and POSIX header that each
-backend's system headers hold.
-`target.t` expects the model of x86-64, of arm64 Linux or of arm64
-macOS, and
-`types.t`, `declarations.t` and `expressions.t` compile for the host's target and
-for a second one, `-m32` on x86-64 and the other signedness of plain
-char elsewhere (`second_target` in `test/run/backends.sh`). A host
-without the C headers of i386 runs the tests that include the C headers
-(`abi.t`) with the other signedness of plain char instead of `-m32`, and
-`dune test` prints a line saying so. A host that has them sets
-`TYPEC_TEST_REQUIRE_M32` to a non-empty value, and `dune test` then
-fails when the backends do not both compile `<limits.h>` with `-m32`;
-the check is a rule of `test/run/dune`, so a run of one test alone
-(`dune test test/run/abi.t`) skips it. `short_enums.t` and
-`c_header.t` also run the `arm-none-eabi-gcc` that `TYPEC_TEST_ARM_GCC`
-names, or the one on the `PATH`, where present, and Clang for
-`thumbv7m-none-eabi` where Clang has that target. The rule that reports `-m32` also prints which of
-the two Arm backends ran and which were skipped, and fails when one is
-missing and `TYPEC_TEST_REQUIRE_ARM` is set to a non-empty value.
-`tutorial.t` runs its lldb examples where the `lldb` on the `PATH`
-debugs the programs of both backends; the same rule prints whether they
-run on this host, and fails when they do not and
-`TYPEC_TEST_REQUIRE_LLDB` is set to a non-empty value.
-The sanitized tests add AddressSanitizer and UndefinedBehaviorSanitizer
-on each backend that links them; the rule prints whether each backend
-does, and fails when one does not and `TYPEC_TEST_REQUIRE_SANITIZERS`
-is set to a non-empty value.
-There are no other dependencies.
+Requirements: OCaml 5.4 and dune 3, and for the tests a Clang and a
+GCC of releases that `typec` supports. There are no other
+dependencies. [Test backends](docs/development.md#test-backends) says
+which compilers the tests run, and how a host requires or skips each.
 
 ```sh
 dune build    # builds typec as _build/install/default/bin/typec
@@ -1578,299 +1353,60 @@ TYPEC_TEST_GCC=/usr/bin/gcc dune test   # with another GCC
 
 `dune exec typec -- ARGS` runs the compiler from the build tree.
 
-`tools/gate.sh` is the command to run before a commit: it runs `dune build`,
-`dune build @check` and `dune test`, then builds the typing oracle and
-runs its tests, which `dune test` skips (see
-[Typing oracle](docs/development.md#typing-oracle)). It needs the opam
-switch `tools` and fails, saying where to find how to create it, when the
-switch is missing. Before its steps it prints that report, which
-`dune test` writes only to the log, so a skipped Arm backend shows, and
-stops where a `TYPEC_TEST_REQUIRE_*` variable of `test/run/backends.sh`
-names one that is missing. It prints the end
-of the log when a step fails; the variables in the header of the script
-set the opam root, the oracle's build directory and the log.
-
-Library tests are in `test/unit`; the parser's are tables of C text and
-the structural dump of its tree (`test/support/tree_dump.ml`) or its
-error. `test_deep_trees` runs every chain that the parser reads in a
-loop (`test/support/chains.ml`), as deep as `Parser.max_depth` lets it,
-through the stages after the parser on a stack limited to 256K words of
-amd64 frames (more where a frame is larger).
-`test/golden` holds cram tests that show the C or the diagnostic
-that the front end gives for a source, with no backend
-(`test/golden/golden.ml`); `dune test test/golden` runs them and
-`dune promote` takes a changed output. Every rule that typec enforces has
-a stable name in the one table `src/syntax/rule_table/rule_table.ml`,
-which generates the module `Rule` and the catalogue
-`_build/default/docs/diagnostics.md` (`dune build docs/diagnostics.md`);
-`test/golden/coverage.ml` fails while some rule's name appears in no
-golden output, so a new rule needs a golden case, and
-`test/golden/citations.ml` fails while an expected output of a golden
-or run test says the word "design": a diagnostic says what is wrong in
-the terms of the user's text, and its rule name is the reference.
-`test/run` holds cram tests that run `typec` and the backends;
-`types.t` and `declarations.t` compile static assertions of what typec
-computes, so a backend that disagrees fails to compile them.
-`test/misuse` holds OCaml that an interface must refuse; each file names
-its library and the expected error text in a `(* misuse: LIBRARY TEXT *)`
-line, and passes only when `ocamlc` rejects it with that text.
+`tools/gate.sh` runs the full suite, the typing oracle's tests
+included, which `dune test` skips; run it before a commit.
+[Developing typec](docs/development.md#the-gate-and-the-tests)
+describes what it runs and how the tests are laid out.
 
 ## Choosing the backend
 
-The backend is the program named by the last `--cc=PATH` option, else by
-the `TYPEC_CC` environment variable when it is set and not empty, else
-`cc`. A name without a slash is looked up in `PATH`. `typec` consumes
-`--cc=`, `--print-target`, `--emit-c`, `--emit-c-header`, `--stats`,
-`--trap-function=` and `--version` where an option can stand (the value
-of `-o` is never one) and forwards every other argument, `--cc` without
-`=` included, in its original order. The backend is run with an
-argument vector, never through a shell, so `TYPEC_CC` names one program:
-it cannot carry extra arguments such as `ccache gcc`.
+`typec` runs the C compiler that the last `--cc=PATH` names, else the
+one that `TYPEC_CC` names, else `cc`. It must be GCC or Clang, Apple's
+included, no older than the releases that `minimum_major_version` in
+[src/sema/target.ml](src/sema/target.ml) names. `TYPEC_CC` names one
+program, so it cannot be `ccache gcc`. To install `typec` as `cc`, set
+`TYPEC_CC` to the real C compiler: a backend that runs `typec` again
+is refused.
 
-A backend that runs `typec` again, such as a `cc` first on `PATH` that
-is `typec` itself, is refused: `typec` sets `TYPEC_OUTER_CC` to the
-backend's name in the environment of every backend it runs, and a
-`typec` that starts with it set exits with 81 after one message naming
-that backend. The whole process tree of the backend inherits the mark,
-so a `typec` that a wrapper backend runs on purpose is refused too. To
-install `typec` as `cc`, set `TYPEC_CC` to the path of the real C
-compiler.
-
-The backend is GCC or Clang, Apple's included, no older than the
-releases that `minimum_major_version` in
-[src/sema/target.ml](src/sema/target.ml) names. `typec` refuses an
-older one with a message naming the oldest supported releases.
-
-Without a `.tc` input `typec` replaces itself with the backend. Exit
-status: the backend's own; a backend ended by a signal ends `typec`
-with the same signal. `typec` exits with 81 when `--cc=` has no path,
-`--trap-function=` names no C identifier or one reserved to typec, the
-backend cannot be started or the backend runs `typec` again, after one
-message on stderr (with `--print-target`, a second says that the backend
-gave no target model).
-
-`typec`'s own failures have statuses of their own, which
-[src/driver/exit_status.ml](src/driver/exit_status.ml) defines and
-design 13.2 explains: 80 when it refuses the program (a diagnostic about
-the source), 81 for an error of its environment (the command line, the
-backend, a file it cannot read or write) and 82 for an internal error, a
-bug in `typec`. Every other status is the backend's.
+`typec`'s own exit statuses are 80 when it refuses the program, 81 for
+an error of the command line or the environment, and 82 for a bug in
+`typec`; every other status is the backend's.
+[Reference 13.1](docs/reference.md#131-the-backend) gives the rules in
+full.
 
 ## Compiling a `.tc` input
 
-An input whose name ends in `.tc`, with no `-x` other than `-x none`
-before it, goes through three steps:
+`typec` compiles a `.tc` file in three steps:
 
-1. `BACKEND -E -D__TYPEC__=1 -std=gnu17 OPTIONS -dD -x c FILE.tc`,
-   with its stdout in a private temporary directory; `-dD` keeps each
-   `#define` and `#undef` in the text, so that `typec` knows which names
-   are macros where;
-2. `typec` reads the preprocessed text, parses it and reads its
-   declarations at file scope, then emits it. The declarations are read
-   for the target model that the backend gives with the options of step
-   3 (see "Printing the target model"). A text that the front end
-   refuses stops `typec` with one message, `FILE:LINE: MESSAGE`. With no
-   Type-C construct the emitted text is the preprocessed text, byte for
-   byte, but that each `#define` and `#undef` line is left empty;
-3. `BACKEND -std=gnu17 OPTIONS -c -o OUTPUT -x cpp-output EMITTED`,
-   with `-S` in place of `-c`, or `-fsyntax-only` in place of `-c -o
-   OUTPUT`, as the command line asks, and with `-fno-trigraphs` last on
-   Clang, which makes Clang read EMITTED without trigraphs, as `typec`
-   read it (design 13.2).
+1. the backend preprocesses it, with `__TYPEC__` defined;
+2. `typec` checks the preprocessed text and lowers it to C11;
+3. the backend compiles that C under the options of the command line.
 
-On Clang, steps 1 and 3 also get `-Wno-unused-command-line-argument`
-before OPTIONS, so that Clang does not warn about an option of the
-command line that the step does not use. GCC does not know the option,
-so its steps go without it. The query for the target model runs before
-the backend is known and gets it on both.
+The outputs are those of a `.c` file, under the same names: an object,
+the assembly of `-S`, a linked program, the dependency file of `-MD`
+or `-MMD`. Every other input goes to the backend untouched.
 
-`-std=gnu17` is left out when the command line gives `-std=` for C11 or
-C17 (`c11`, `c17`, `c18`, `gnu11`, `gnu17`, `gnu18`, `c1x`, `gnu1x`,
-`iso9899:2011`, `iso9899:2017`, `iso9899:2018`); any other `-std=` is a
-usage error. Step 2 reads `asm` and `typeof` as keywords in the GNU forms
-and as identifiers in the ISO forms, as GCC and Clang do; `-fasm` and
-`-fno-asm` select the GNU and the ISO keywords whatever `-std=` says.
-The options of step 1 are those that matter to
-preprocessing and to code generation, those of step 3 the latter only;
-`src/driver/cc_option.ml` is the one table that tells them apart and
-says which options take a separate value. The output is named as cc
-names it: after `-o`, else after the input in the current directory.
-When the command line links and has no input but `.tc` ones, step 3
-is the final command: the backend compiles and links the command line
-with each `.tc` input replaced by `-x cpp-output EMITTED`, where EMITTED
-is named as the input with the suffix `.c`, in a directory of its own.
-The backend thus leaves what it leaves for a one-step build of C
-sources, named as there: on macOS the `.dSYM` bundle of `-g`, and the
-files of `-gsplit-dwarf`, `-fstack-usage` and `-fcallgraph-info`. When
-the command line links with other inputs, each `.tc` input becomes an
-object in the temporary directory and the backend links the command line
-with those objects in place of the `.tc` inputs, and the side outputs of
-step 3 are lost with the objects; without linking, the other inputs are
-compiled by one more backend command without the `.tc` inputs. A `.c`
-input is thus compiled exactly as without `typec`.
+`typec` adds four options:
 
-With `-MD` or `-MMD` the dependency file comes from step 1, named as cc
-names it: after `-MF`, else after `-o` with the suffix `.d`, else after
-the input; its target is the `-MT` or `-MQ` value, else the real output.
-With `-M` or `-MM` the command line compiles nothing: step 1 of each
-`.tc` input prints its rule in place of the preprocessed text, to the
-`-o` file or stdout, and one more backend command gets the command line
-without the `.tc` inputs, when other inputs remain, to print theirs.
+- `--emit-c` writes the C of step 2 in place of compiling it;
+- `--trap-function=NAME` makes a failed check call `NAME` in place of
+  `__builtin_trap()`, for freestanding code;
+- `--print-target` prints the target model for which step 2 reads the
+  file;
+- `--stats` prints the sizes that `typec` counts against its limits.
 
-`--emit-c` stops after step 2 and writes the C to the `-o` file, or to
-stdout; the command line then has exactly one input, a `.tc` file.
-
-`--trap-function=NAME` makes every trap of the emitted C (a corrupted
-tag, a slice index out of range) call `_Noreturn void NAME(void)`, which
-the program supplies, instead of executing `__builtin_trap()` alone; a
-freestanding program uses it to report the failure (design 10.5). NAME
-is a C identifier of ASCII letters, digits and underscores outside the
-names reserved to typec, which begin with `__tc_`, and the last
-`--trap-function=` wins. NAME is the name the program defines, not a
-macro: the emitted C is already preprocessed, so `-DNAME=...` does not
-change it. A `.tc` unit that holds a Type-C construct declares NAME
-after its own text, so a declaration of NAME in the program with
-another type is a backend error reported at typec's text (`<typec>`).
-
-`--stats` prints on stderr, for each `.tc` input and for the `.tci`
-input of `--emit-c-header`, one line `typec: stats: FILE: ` and the
-fields `unit_bytes` (the preprocessed unit), `instance_bytes` (charged
-to the instance budget), `copy_bytes` (the front end's charge to the
-output limit for the copies of deferred statements, which
-`output_bytes` counts again), `output_bytes` (charged to the output
-limit by lowering, the unit's own text included, and for a header then
-every byte of the header, its macro brackets and macro probe among
-them), `output_limit`, `longest_instance_code` (the most bytes of the
-code of one instance, its generic's name and the encodings of its
-arguments, that the bound on encodings holds) and `longest_name` (of a
-type declaration or a generic function, the universe text included),
-each as `name=value`: the counts of design 3.5 rule 7 that the
-measurements of P30 read. Then come the slice tests of the unit and of
-each instance that it uses, which the measurements of P28 read:
-`slice_indexes`, `slice_subs` and `slice_conversions` (those that C
-evaluates, which lowering writes with a test), `slice_untested` (those
-that C does not evaluate) and `slice_late_calls` (the tested indexes and
-`slice_sub`s with a call or a statement expression in an operand after
-the first). Last come the most steps (`selection_steps`), nodes
-(`selection_nodes`) and nodes on one path (`selection_depth`) that
-building the selection tree of one match or test of the unit or of an
-instance took, which the measurements of P32 read, each the most over
-all of them. The holders of a `try` of the unit and of each instance come
-last, which the measurements of P33 to P35 read: `try_holders` (the
-holders), `try_tries` (their `try` expressions), `try_first_operands`
-(the hoisted operands that are the first operand of `&&`, `||` or a
-conditional operator or the left operand of a comma), `try_conditioned`
-(the hoisted operands under a condition) and `try_multiple` (the holders
-with more than one hoisted operand). A unit that typec refuses reports
-none.
-
-A `.tc` input refuses the option that stops the backend at
-preprocessing (`-E`), the options that change the preprocessed text
-(`-P`, `-C`, `-CC`, `-fuse-line-directives`, `-traditional-cpp`,
-`-fdirectives-only`), every `-d` option of dumps (`-dD`, `-dM`, `-dI`
-and the like), alone or passed on by `-Wp,`, `-Xpreprocessor` or
-`-Xclang` (which so refuses Clang's `-Xclang -disable-O0-optnone` too),
-`-save-temps`, `-###`, `-ansi`, `--`, the options that
-name a file of further options (response files, `@FILE`, `-specs=` and
-`--config=`) and the queries that print a fact of the backend
-(`-print-file-name=` and every other `-print-` option, `-dumpmachine`),
-with a usage error naming the option.
-It refuses a long option, spelled with `--`, that it does not know, as
-GCC reads `--NAME` as `-fNAME` and accepts abbreviations, so that
-`--preprocess`, `--write-user-dep` or `--short-enums` cannot reach the
-backend unseen; an option that also has a form with one `-` passes
-in that form.
-It refuses the options known to change a type of C without changing a
-macro that the target model reads, which the model therefore cannot
-see: `-funsigned-bitfields` or `-fno-signed-bitfields`, and
-`-fsingle-precision-constant`, even when a later option undoes them.
-`-fshort-enums` passes: the target query learns the enumeration
-representation by its probe compiles ([Printing the target
-model](#printing-the-target-model)). Other routes to these types, such
-as a config file, a wrapper or a target whose default differs, fail in step
-3: the C of a unit with a Type-C construct ends, after a line marker
-for `<typec>` with flag 3, with a static assertion of each such type
-that `typec` assumes, whose message names the option that would break
-it; that of the enumeration rule also states the representation that
-`typec` expects. Flag 3 keeps the user's warning options off typec's own text. An option
-that changes a macro the model reads, such as
-`-funsigned-char` or `-fshort-wchar`, reaches the target model.
-It refuses `-fpack-struct` without a value, under which GCC
-ignores the `#pragma pack` lines that `typec` writes around an instance
-of a generic and warns of each; `-fpack-struct=n` passes. A unit that
-holds such lines also ends with a probe that fails where the backend
-reads `#pragma pack()` as a pop, as Clang does under
-`-fapple-pragma-pack`.
-It also refuses `-arch` options that name more than one architecture: cc
-builds a universal binary from them, but step 1 preprocesses for one
-architecture only. Build each architecture with its own `-arch` and join
-the results with `lipo -create`.
-
-A freestanding build passes `-ffreestanding -nostdlib` as for C. The
-objects need from the environment what the same C needs, such as
-`memset`, and nothing more: a trap is `__builtin_trap()`, an
-instruction on x86-64 and AArch64
-([design 10.4](type-c-language-design.md#104-functions-and-objects)).
-
-The temporary directory is made with mode 0700 in `TMPDIR`, or `/tmp`,
-and removed on every way out. SIGHUP, SIGINT, SIGPIPE, SIGQUIT and
-SIGTERM are passed on to the running backend; `typec` then removes the
-directory and ends by the same signal.
-
-Exit status: 0 when every step succeeds; else the status of the first
-backend step that fails, or the signal that ended it; 80 when the reader
-or the front end refuses the preprocessed text; 81 for a usage error,
-when the backend cannot be started or gives no target model, or when a
-file cannot be read or written; 82 for an internal error.
-
-## Printing the target model
-
-`typec --print-target [OPTIONS]` runs the backend as
-`BACKEND OPTIONS -dM -E -x c /dev/null` and prints the target model that
-its predefined macros give: the backend and its major version, the
-sizes of the scalar types, the
-signedness of `char`, the types behind `size_t` and the other standard
-typedefs, the byte order and `__STDC_VERSION__`, one `field: value` per
-line, and last the enumeration representation, `int-sized` or `short`
-(as under `-fshort-enums`), which no macro states: `typec` learns it by
-two compiles of a probe,
-`BACKEND OPTIONS -fsyntax-only -w -dumpdir DIR/ -x c -`,
-each of which compiles under one representation alone. Whether the
-backend has `__float128`, among the optional floating types, comes from
-a third compile of the same form, since no macro says so on every
-target. The other arguments are the backend options that select the
-target or the dialect, such as `-m32`, `-funsigned-char` or `-std=gnu17`;
-inputs, `-o` and dependency options do not belong there.
-
-Exit status: 0 with the model on stdout; 81 when the backend fails,
-cannot be started, is not supported or prints macros the model cannot
-be read from, when it compiles neither probe or both, or for a usage
-error; 82 for an internal error.
+With a `.tc` input it refuses the options it cannot follow, such as
+`-E`, `-save-temps` and `-funsigned-bitfields`.
+[Reference 13.2](docs/reference.md#132-compiling-a-tc-input) gives the
+exact backend commands, each refused option with its reason, and the
+exit statuses.
 
 ## Printing the version
 
-`typec --version` runs `BACKEND --version`, passes on its output, then
-prints `typec` and its release on a last line, such as `typec 1.0`. A
-build tool that tells compilers apart by the output of `$CC --version`,
-such as Meson, or a script that reads its first line thus sees the
-backend. The rest of the command line does not reach the backend and
-nothing is compiled, as GCC and Clang compile nothing with their
-`--version`; an error in one of `typec`'s own options, such as `--cc=`
-without a path, is still one. The status is the backend's, or 81 when
-it cannot be started, or 0 when SIGPIPE ended the backend and the
-reader of the output is gone, as a reader such as `head -1` that stops
-early is no failure; a backend that fails or cannot be started is named
-on stderr, and `typec`'s line is still printed. The release has one
-source, the `version` field of `dune-project`, which the build writes
-into `typec`; a release tag `vX.Y` is made after it is set.
-
-## The manual page
-
-`docs/typec.1`, in mdoc(7), is installed by `dune install` as
-`man/man1/typec.1` under the prefix, or under the directory of
-`--mandir`. `test/unit/test_manual.ml` checks its lists of `typec`'s
-options and exit statuses against the driver's tables, and
-`mandoc -Tlint -Wwarning docs/typec.1` checks its markup.
+`typec --version` prints the backend's `--version` output, then
+`typec` and its release on a last line, such as `typec 1.0`, so that a
+build tool that identifies `$CC` by that output, such as Meson, sees
+the backend. [typec(1)](docs/typec.1) gives its exit status.
 
 ## Developing typec
 
