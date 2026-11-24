@@ -1500,9 +1500,7 @@ interface files (`.tci`), generic types and functions, `option` and
 `str`. `typec --emit-c-header` writes the C header of an interface for
 C clients. The [design](type-c-language-design.md) specifies the whole
 language, and the [plan](type-c-implementation-plan.md) built it in
-stages, each ending in a measured gate, and the three pilots build
-with this release
-([Measured on real code](#measured-on-real-code)).
+stages, each ending in a measured gate.
 
 The test suite passes with Clang and with GCC on macOS, x86-64 and
 arm64, and on Linux, with glibc on x86-64 and with musl on x86-64 and
